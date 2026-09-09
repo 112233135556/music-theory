@@ -302,9 +302,8 @@ export default function App(){
     if(artSearch.length<2){setArtSearchRes([]);return;}
     artSearchRef.current=setTimeout(async()=>{
       try{
-        const r=await api.searchArtists(artSearch);
+        const r=await api.search(artSearch,'artist',12);
         const found=r.artists?.items||[];
-        // Filter out artists already in topArtists to avoid duplicates
         const topIds=new Set(topArtists.map(a=>a.id));
         setArtSearchRes(found.filter(a=>!topIds.has(a.id)));
       }catch(e){console.error('artist search',e);}
@@ -344,12 +343,32 @@ export default function App(){
     let tracks=[];
     if(mixPerso){
       // Use all 3 time periods for max diversity
-      try{const r=await api.topTracksAll();tracks=r.items||[];}
-      catch(e){tracks=topTracks;}
+      try{
+        // Try topTracksAll first (new api.js), fallback to 3 separate calls, then topTracks
+        if(typeof api.topTracksAll==='function'){
+          const r=await api.topTracksAll();
+          tracks=r.items||[];
+        }
+        if(!tracks.length){
+          const[s,m,l]=await Promise.all([
+            api.topTracks('short_term'),
+            api.topTracks('medium_term'),
+            api.topTracks('long_term'),
+          ]);
+          const seen=new Set();
+          tracks=[...(s.items||[]),...(m.items||[]),...(l.items||[])].filter(t=>{
+            if(seen.has(t.id))return false;seen.add(t.id);return true;
+          });
+        }
+      }catch(e){console.error('topTracksAll',e);tracks=topTracks;}
     }else{
       for(const a of selArts){
-        try{const d=await api.artistTracks(a.id);tracks.push(...(d.tracks||[]));}
-        catch(e){console.error('artist tracks',a.name,e);}
+        try{
+          const r=await api.search(a.name,'track',30);
+          const artTracks=(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase()));
+          if(artTracks.length){tracks.push(...artTracks);}
+          else{const r2=await api.search(`artist:${a.name}`,'track',20);tracks.push(...(r2.tracks?.items||[]));}
+        }catch(e){console.error('tracks for',a.name,e);}
       }
     }
     if(!tracks.length)return[];
