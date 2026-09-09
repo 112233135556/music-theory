@@ -243,6 +243,8 @@ export default function App(){
   const[loggedIn,setLoggedIn]=useState(isLoggedIn());
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
+  const[joinCode,setJoinCode]=useState('');
+  const[joinMode,setJoinMode]=useState(false);
   const timerRef=useRef(null);
   const progRef=useRef(null);
   const bgRef=useRef(null);
@@ -488,18 +490,24 @@ export default function App(){
           <div style={{display:'flex',flexDirection:'column',gap:'clamp(9px,.9vh,14px)'}}>
             {[
               {label:'Blind_Test',sub:'Solo ou 1v1 — devine les sons',icon:IC.music,grad:'linear-gradient(135deg,#5865F2,#7c3aed)',action:()=>setScreen('config'),active:true},
-              {label:'Rejoindre',sub:'Rejoindre avec un code',icon:IC.link,grad:null,active:false},
+              {label:'Rejoindre',sub:'Rejoindre avec un code',icon:IC.link,grad:null,active:true,isJoin:true},
               {label:'Autres jeux',sub:'Bientôt disponible',icon:IC.game,grad:null,active:false,off:true},
             ].map(c=>(
-              <div key={c.label} onClick={c.off||!c.active?undefined:c.action} style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',cursor:c.off?'not-allowed':c.active?'pointer':'default',opacity:c.off?.36:1,transition:'background .15s'}}
-                onMouseEnter={e=>!c.off&&c.active&&(e.currentTarget.style.background='rgba(255,255,255,.16)')}
+              <div key={c.label} onClick={c.off?undefined:c.isJoin?()=>setJoinMode(m=>!m):c.action} style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',cursor:c.off?'not-allowed':c.active?'pointer':'default',opacity:c.off?.36:1,transition:'background .15s',flexDirection:c.isJoin&&joinMode?'column':'row',alignItems:c.isJoin&&joinMode?'flex-start':'center'}}
+                onMouseEnter={e=>!c.off&&c.active&&!joinMode&&(e.currentTarget.style.background='rgba(255,255,255,.16)')}
                 onMouseLeave={e=>!c.off&&(e.currentTarget.style.background='var(--mR)')}>
-                <div style={{width:'clamp(40px,3.8vh,56px)',height:'clamp(40px,3.8vh,56px)',borderRadius:'clamp(10px,.9vw,15px)',display:'flex',alignItems:'center',justifyContent:'center',background:c.grad||'rgba(0,0,0,.16)',flexShrink:0,fontSize:'clamp(17px,1.7vh,25px)',color:'rgba(255,255,255,.8)',boxShadow:c.grad?'0 4px 16px rgba(88,101,242,.3)':'var(--le)'}}>{c.icon}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:'clamp(14px,.95vw,19px)',fontWeight:600,marginBottom:3}}>{c.label}</div>
-                  <div style={{fontSize:'clamp(11px,.76vw,15px)',color:'var(--t2)'}}>{c.sub}</div>
+                <div style={{display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',width:'100%'}}>
+                  <div style={{width:'clamp(40px,3.8vh,56px)',height:'clamp(40px,3.8vh,56px)',borderRadius:'clamp(10px,.9vw,15px)',display:'flex',alignItems:'center',justifyContent:'center',background:c.grad||'rgba(0,0,0,.16)',flexShrink:0,fontSize:'clamp(17px,1.7vh,25px)',color:'rgba(255,255,255,.8)',boxShadow:c.grad?'0 4px 16px rgba(88,101,242,.3)':'var(--le)'}}>{c.icon}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:'clamp(14px,.95vw,19px)',fontWeight:600,marginBottom:3}}>{c.label}</div>
+                    <div style={{fontSize:'clamp(11px,.76vw,15px)',color:'var(--t2)'}}>{c.sub}</div>
+                  </div>
+                  {c.active&&!c.off&&<span style={{color:'var(--t3)',fontSize:'clamp(17px,1.6vw,25px)',display:'flex'}}>{joinMode&&c.isJoin?IC.x:IC.chevR}</span>}
                 </div>
-                {c.active&&!c.off&&<span style={{color:'var(--t3)',fontSize:'clamp(17px,1.6vw,25px)',display:'flex'}}>{IC.chevR}</span>}
+                {c.isJoin&&joinMode&&<div style={{width:'100%',display:'flex',gap:'clamp(8px,.7vw,12px)',paddingTop:'clamp(8px,.8vh,12px)'}} onClick={e=>e.stopPropagation()}>
+                  <input value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase().slice(0,6))} placeholder="Code de la partie (ex: MT·7K4X)" style={{flex:1,background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',borderRadius:'clamp(8px,.7vw,12px)',padding:'clamp(9px,.9vh,14px) clamp(12px,1vw,18px)',color:'var(--t1)',fontSize:'clamp(12px,.85vw,15px)',outline:'none',fontFamily:'var(--F)',letterSpacing:'.06em',fontWeight:600}} onKeyDown={e=>e.key==='Enter'&&alert('Fonctionnalité 1v1 en cours de développement')}/>
+                  <button onClick={()=>alert('Fonctionnalité 1v1 en cours de développement')} className="btn-solid" style={{padding:'clamp(9px,.9vh,14px) clamp(16px,1.5vw,24px)',borderRadius:'clamp(8px,.7vw,12px)',fontSize:'clamp(12px,.85vw,15px)',flexShrink:0}}>Rejoindre</button>
+                </div>}
               </div>
             ))}
           </div>
