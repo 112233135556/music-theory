@@ -152,7 +152,7 @@ function Pill({active,onClick,children,sm}){
 
 // ── ROOT ───────────────────────────────────────────────────
 export default function App(){
-  const[screen,setScreen]=useState('login');
+  const[screen,setScreen]=useState(isLoggedIn()?'home':'login');
   const[user,setUser]=useState(null);
   const[topArtists,setTopArtists]=useState([]);
   const[topTracks,setTopTracks]=useState([]);
@@ -185,7 +185,7 @@ export default function App(){
     if(window.location.pathname==='/callback'){
       const p=new URLSearchParams(window.location.search);
       const at=p.get('access_token');
-      if(at){saveTokens({access_token:at,refresh_token:p.get('refresh_token'),expires_in:p.get('expires_in')});setLoggedIn(true);}
+      if(at){saveTokens({access_token:at,refresh_token:p.get('refresh_token'),expires_in:p.get('expires_in')});setLoggedIn(true);setScreen('home');}
       window.history.replaceState({},'','/');
     }
   },[]);
