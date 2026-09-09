@@ -1,8 +1,7 @@
-// ─── Config ──────────────────────────────────────────────────
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const SP   = 'https://api.spotify.com/v1';
 
-// ─── Token refresh (must go through server — needs client_secret) ─
+// ─── Token refresh (passe par le serveur — besoin du client_secret) ─────────
 export async function refreshToken() {
   const refresh_token = localStorage.getItem('refresh_token');
   if (!refresh_token) return false;
@@ -12,47 +11,57 @@ export async function refreshToken() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token }),
     });
-    const data = await res.json();
-    if (data.access_token) {
-      localStorage.setItem('access_token', data.access_token);
-      localStorage.setItem('token_expires', Date.now() + data.expires_in * 1000);
+    const d = await res.json();
+    if (d.access_token) {
+      localStorage.setItem('access_token', d.access_token);
+      localStorage.setItem('token_expires', Date.now() + d.expires_in * 1000);
       return true;
     }
-  } catch (e) { console.error('refresh error', e); }
+  } catch (e) { console.error('[api] refresh error', e); }
   return false;
 }
 
-// ─── Direct Spotify API caller ──────────────────────────────────
-// Bypasses the server proxy → no CORS issues, no proxy failures,
-// and Spotify automatically uses the token's market (no restriction).
-async function spFetch(path) {
+async function ensureFreshToken() {
   const expires = parseInt(localStorage.getItem('token_expires') || '0');
   if (expires && Date.now() > expires - 60000) await refreshToken();
+}
 
+// ─── Appel via le serveur proxy (search, artistTracks) ───────────────────────
+// On route search et artistTracks par le serveur parce qu'ils fonctionnent
+// déjà pour l'autocomplete des sons — même chemin, mêmes headers.
+async function apiFetch(path) {
+  await ensureFreshToken();
   const token = localStorage.getItem('access_token');
-  if (!token) throw new Error('No access token');
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Server ${res.status}: ${path}`);
+  return res.json();
+}
 
+// ─── Appel direct Spotify (données utilisateur) ───────────────────────────────
+// Les données perso (top tracks, top artists, me) fonctionnent en direct —
+// Spotify supporte CORS pour ces endpoints.
+async function spFetch(path) {
+  await ensureFreshToken();
+  const token = localStorage.getItem('access_token');
   const res = await fetch(`${SP}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`Spotify ${res.status}: ${JSON.stringify(body)}`);
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Spotify ${res.status}: ${JSON.stringify(err)}`);
   }
   return res.json();
 }
 
-// ─── API surface ────────────────────────────────────────────────
 export const api = {
-  // User profile
+  // Données perso — direct Spotify (CORS OK pour /me/top/*)
   me: () => spFetch('/me'),
+  topTracks: (tr = 'medium_term') => spFetch(`/me/top/tracks?time_range=${tr}&limit=50`),
+  topArtists: (tr = 'medium_term') => spFetch(`/me/top/artists?time_range=${tr}&limit=50`),
 
-  // Single time range
-  topTracks: (time_range = 'medium_term') =>
-    spFetch(`/me/top/tracks?time_range=${time_range}&limit=50`),
-
-  // All 3 periods combined → up to ~150 unique tracks for mix perso
+  // Mix perso = 3 périodes combinées (~150 tracks uniques)
   topTracksAll: async () => {
     const [s, m, l] = await Promise.all([
       spFetch('/me/top/tracks?time_range=short_term&limit=50'),
@@ -60,7 +69,7 @@ export const api = {
       spFetch('/me/top/tracks?time_range=long_term&limit=50'),
     ]);
     const seen = new Set();
-    const all = [...(s.items || []), ...(m.items || []), ...(l.items || [])].filter(t => {
+    const all = [...(s.items||[]), ...(m.items||[]), ...(l.items||[])].filter(t => {
       if (seen.has(t.id)) return false;
       seen.add(t.id);
       return true;
@@ -68,20 +77,13 @@ export const api = {
     return { items: all };
   },
 
-  // Top artists
-  topArtists: (time_range = 'medium_term') =>
-    spFetch(`/me/top/artists?time_range=${time_range}&limit=50`),
-
-  // Search tracks (autocomplete during game)
+  // Search via serveur — FONCTIONNE pour les sons (autocomplete en jeu),
+  // donc aussi pour les artistes. limit=6 identique à ce qui marche.
   search: (q, type = 'track', limit = 6) =>
-    spFetch(`/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`),
+    apiFetch(`/api/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`),
 
-  // Search full Spotify artist catalog
-  searchArtists: (q) =>
-    spFetch(`/search?q=${encodeURIComponent(q)}&type=artist&limit=12`),
-
-  // Artist top tracks — direct call, Spotify uses token market automatically
-  artistTracks: (id) => spFetch(`/artists/${id}/top-tracks`),
+  // Tracks d'un artiste via serveur (endpoint /api/artists/:id/tracks)
+  artistTracks: (id) => apiFetch(`/api/artists/${id}/tracks`),
 
   loginUrl: () => `${BASE}/auth/login`,
 };
