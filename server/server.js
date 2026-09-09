@@ -29,7 +29,6 @@ async function spGet(url, token) {
   return axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
 }
 
-// ── Auth ──────────────────────────────────────────────────
 app.get('/auth/login', (req, res) => {
   const state = rand(16);
   res.cookie('spotify_state', state, { httpOnly: true, sameSite: 'lax' });
@@ -70,7 +69,6 @@ app.post('/auth/refresh', async (req, res) => {
   } catch(e) { res.status(400).json({ error: 'refresh_failed' }); }
 });
 
-// ── API proxy ─────────────────────────────────────────────
 app.get('/api/me', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
   try { res.json((await spGet('https://api.spotify.com/v1/me', t)).data); }
@@ -112,7 +110,7 @@ app.get('/api/artists/:id/tracks', async (req,res) => {
 
 app.get('/health', (_, res) => res.json({ ok:true }));
 
-// ── WebSocket 1v1 ─────────────────────────────────────────
+// WebSocket
 const rooms = new Map();
 function send(ws, obj) { if (ws?.readyState===1) ws.send(JSON.stringify(obj)); }
 
@@ -135,8 +133,7 @@ function handleWS(ws, msg) {
       const code = rand(4).toUpperCase();
       rooms.set(code, { host:ws, guest:null, settings:msg.settings });
       ws.roomCode=code; ws.role='host';
-      send(ws, { type:'room_created', code });
-      break;
+      send(ws, { type:'room_created', code }); break;
     }
     case 'join_room': {
       const r = rooms.get(msg.code?.toUpperCase());
@@ -144,31 +141,26 @@ function handleWS(ws, msg) {
       if (r.guest) return send(ws, { type:'error', msg:'Room pleine' });
       r.guest=ws; ws.roomCode=msg.code.toUpperCase(); ws.role='guest';
       send(ws, { type:'room_joined', settings:r.settings });
-      send(r.host, { type:'guest_joined', name:msg.name||'Joueur 2' });
-      break;
+      send(r.host, { type:'guest_joined', name:msg.name||'Joueur 2' }); break;
     }
     case 'artist_update': {
       const r = rooms.get(ws.roomCode); if (!r) return;
-      send(ws.role==='host'?r.guest:r.host, { type:'artist_update', artists:msg.artists, mix:msg.mix });
-      break;
+      send(ws.role==='host'?r.guest:r.host, { type:'artist_update', artists:msg.artists, mix:msg.mix }); break;
     }
     case 'game_start': {
       const r = rooms.get(ws.roomCode); if (!r||ws.role!=='host') return;
-      send(r.guest, { type:'game_start', tracks:msg.tracks });
-      break;
+      send(r.guest, { type:'game_start', tracks:msg.tracks }); break;
     }
     case 'answer_found': {
       const r = rooms.get(ws.roomCode); if (!r) return;
-      send(ws.role==='host'?r.guest:r.host, { type:'opponent_found', time:msg.time, score:msg.score });
-      break;
+      send(ws.role==='host'?r.guest:r.host, { type:'opponent_found', time:msg.time, score:msg.score }); break;
     }
     case 'host_control': {
       const r = rooms.get(ws.roomCode); if (!r||ws.role!=='host') return;
-      send(r.guest, { type:'host_control', action:msg.action, value:msg.value });
-      break;
+      send(r.guest, { type:'host_control', action:msg.action, value:msg.value }); break;
     }
   }
 }
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`✅ music-theory server on :${PORT}`));
+server.listen(PORT, () => console.log(`✅ music-theory server :${PORT}`));
