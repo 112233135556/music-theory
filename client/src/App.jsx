@@ -35,7 +35,6 @@ async function spDirect(path) {
 }
 
 const CSS = `
-@import url('https://fonts.spikerko.org/spicy-lyrics/source.css');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 :root{
   --t1:hsla(0,0%,100%,.92);--t2:hsla(0,0%,100%,.6);--t3:hsla(0,0%,100%,.35);--t4:hsla(0,0%,100%,.18);
@@ -44,7 +43,7 @@ const CSS = `
   --le:inset 0 1px 0 rgba(255,255,255,.38),inset 0 0 0 1px rgba(255,255,255,.12),inset 0 -1px 0 rgba(255,255,255,.2);
   --leS:inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(255,255,255,.18),inset 0 -1px 0 rgba(255,255,255,.3);
   --cast:0 16px 40px -8px rgba(8,10,18,.55),0 4px 12px -2px rgba(8,10,18,.35);
-  --F:SpicyLyrics,'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',system-ui,sans-serif;
+  --F:'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',system-ui,sans-serif;
   --sp:cubic-bezier(0.16,1,0.3,1);
   --BAR:clamp(48px,3.5vh,60px);--PB:clamp(56px,5vh,72px);
 }
@@ -345,19 +344,29 @@ export default function App(){
   },[screen,paused]);
 
   // ─── Artist search — spDirect calls Spotify API directly ───
+  // Ref pour topArtists — évite de refirer l'effet à chaque chargement d'artiste
+  const topArtistsRef = useRef([]);
+  useEffect(()=>{ topArtistsRef.current=topArtists; },[topArtists]);
+
   useEffect(()=>{
     clearTimeout(artRef.current);
     if(artQ.length<2){setArtRes([]);return;}
     artRef.current=setTimeout(async()=>{
       try{
-        // Direct Spotify call — no server proxy, no missing endpoint
-        const r=await spDirect(`/search?q=${encodeURIComponent(artQ)}&type=artist&limit=12`);
+        // api.search via serveur — même chemin que l'autocomplete sons qui fonctionne
+        const r=await api.search(artQ,'artist',6);
         const found=r.artists?.items||[];
-        const topIds=new Set(topArtists.map(a=>a.id));
-        setArtRes(found.filter(a=>!topIds.has(a.id)));
-      }catch(e){console.error('artist search error:',e.message);}
-    },350);
-  },[artQ,topArtists]);
+        console.log('[MT] artist search:',found.length,'results for',artQ);
+        // Filtre les artistes déjà dans le top (ref, pas state)
+        const topIds=new Set(topArtistsRef.current.map(a=>a.id));
+        const filtered=found.filter(a=>!topIds.has(a.id));
+        setArtRes(filtered.length>0?filtered:found);
+      }catch(e){
+        console.error('[MT] artist search failed:',e.message);
+        setErr(`Recherche "${artQ}" échouée: ${e.message}`);
+      }
+    },400);
+  },[artQ]); // dépendance artQ seulement — topArtists via ref
 
   const playTrack=useCallback(async(track)=>{
     if(!deviceId||!track)return;
@@ -392,26 +401,27 @@ export default function App(){
         tracks=topTracks; // fallback to already loaded
       }
     }else{
-      // For each selected artist, get their top tracks directly from Spotify
       for(const a of selArts){
+        let artTracks=[];
+        // APPROCHE 1: top-tracks via serveur (endpoint /api/artists/:id/tracks)
         try{
-          const d=await spDirect(`/artists/${a.id}/top-tracks`);
-          if(d.tracks?.length){
-            tracks.push(...d.tracks);
-          }else{
-            // Fallback: search for this artist's tracks
-            const r=await spDirect(`/search?q=${encodeURIComponent(a.name)}&type=track&limit=20`);
-            const filtered=(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id));
-            tracks.push(...(filtered.length?filtered:(r.tracks?.items||[]).slice(0,10)));
-          }
-        }catch(e){
-          console.error(`Error tracks for ${a.name}:`,e.message);
-          // Last resort fallback via search
+          const d=await api.artistTracks(a.id);
+          artTracks=d.tracks||[];
+          console.log('[MT] artistTracks via server for',a.name,':',artTracks.length);
+        }catch(e1){
+          console.warn('[MT] artistTracks failed:',e1.message,'; fallback search...');
+          // APPROCHE 2: search via serveur (même endpoint que autocomplete sons)
           try{
-            const r=await spDirect(`/search?q=${encodeURIComponent(a.name)}&type=track&limit=15`);
-            tracks.push(...(r.tracks?.items||[]));
-          }catch(e2){}
+            const r=await api.search(a.name,'track',6);
+            const items=r.tracks?.items||[];
+            artTracks=items.filter(t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase()));
+            if(!artTracks.length) artTracks=items; // si filtre trop strict, prendre tout
+            console.log('[MT] search fallback for',a.name,':',artTracks.length);
+          }catch(e2){
+            console.error('[MT] both methods failed for',a.name,':',e2.message);
+          }
         }
+        tracks.push(...artTracks);
       }
     }
     if(!tracks.length)return[];
@@ -451,8 +461,13 @@ export default function App(){
   },[]);
 
   const handleVolume=useCallback((v)=>{
-    setVol(v);
-    playerRef.current?.setVolume(v).catch(()=>{});
+    const safeVol=Math.max(0,Math.min(1,v));
+    setVol(safeVol);
+    if(playerRef.current){
+      playerRef.current.setVolume(safeVol).catch(()=>{});
+      // Forcer mute complet si 0
+      if(safeVol===0)playerRef.current.setVolume(0).catch(()=>{});
+    }
   },[]);
 
   // Song autocomplete — keep using api.search (works through server)
@@ -484,8 +499,11 @@ export default function App(){
   const API=import.meta.env.VITE_API_URL||'http://localhost:3001';
   const topPad='var(--BAR)';
   const botPad=showPB?'var(--PB)':'0px';
-  const filtLocal=topArtists.filter(a=>a.name.toLowerCase().includes(artQ.toLowerCase()));
-  const showSPRes=artQ.length>=2&&artRes.length>0;
+  // UX: top artistes visibles par défaut, cachés quand on cherche (résultats globaux Spotify)
+  const isSearching=artQ.length>=2;
+  const filtLocal=isSearching?[]:topArtists; // cache top artistes pendant la recherche
+  const showSPRes=isSearching&&artRes.length>0;
+  const showSearching=isSearching&&artRes.length===0;
 
   const SearchBar=(
     <div style={{position:'relative',width:'clamp(260px,26vw,500px)'}}>
@@ -647,7 +665,8 @@ export default function App(){
               );})}
             </div>
           </>}
-          <p style={{fontSize:'clamp(9px,.67vw,13px)',fontWeight:500,color:'var(--t3)',marginBottom:'clamp(9px,.9vh,15px)'}}>{artQ?`Ton top — "${artQ}"`:'Basé sur tes écoutes Spotify'}</p>
+          {showSearching&&<p style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t3)',marginBottom:'clamp(9px,.9vh,15px)',fontStyle:'italic'}}>Recherche "{artQ}" sur Spotify…</p>}
+          {!isSearching&&<p style={{fontSize:'clamp(9px,.67vw,13px)',fontWeight:500,color:'var(--t3)',marginBottom:'clamp(9px,.9vh,15px)'}}>Basé sur tes écoutes Spotify</p>}
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(55px,5.8vw,105px),1fr))',gap:'clamp(12px,1.2vw,22px)'}}>
             {filtLocal.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
               <div key={a.id} onClick={()=>toggleArtist(a)} style={{cursor:'pointer',textAlign:'center'}}>
