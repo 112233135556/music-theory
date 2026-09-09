@@ -29,6 +29,7 @@ async function spGet(url, token) {
   return axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
 }
 
+// ── Auth ──────────────────────────────────────────────────
 app.get('/auth/login', (req, res) => {
   const state = rand(16);
   res.cookie('spotify_state', state, { httpOnly: true, sameSite: 'lax' });
@@ -69,6 +70,7 @@ app.post('/auth/refresh', async (req, res) => {
   } catch(e) { res.status(400).json({ error: 'refresh_failed' }); }
 });
 
+// ── API ───────────────────────────────────────────────────
 app.get('/api/me', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
   try { res.json((await spGet('https://api.spotify.com/v1/me', t)).data); }
@@ -80,6 +82,25 @@ app.get('/api/top-tracks', async (req,res) => {
   const { time_range='medium_term', limit=50 } = req.query;
   try { res.json((await spGet(`https://api.spotify.com/v1/me/top/tracks?time_range=${time_range}&limit=${limit}`, t)).data); }
   catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
+});
+
+// Combine 3 time periods for a bigger mix pool (up to ~150 unique tracks)
+app.get('/api/top-tracks-all', async (req,res) => {
+  const t = req.headers.authorization?.split(' ')[1];
+  try {
+    const [s, m, l] = await Promise.all([
+      spGet('https://api.spotify.com/v1/me/top/tracks?time_range=short_term&limit=50', t),
+      spGet('https://api.spotify.com/v1/me/top/tracks?time_range=medium_term&limit=50', t),
+      spGet('https://api.spotify.com/v1/me/top/tracks?time_range=long_term&limit=50', t),
+    ]);
+    const seen = new Set();
+    const all = [...s.data.items, ...m.data.items, ...l.data.items].filter(tr => {
+      if (seen.has(tr.id)) return false;
+      seen.add(tr.id);
+      return true;
+    });
+    res.json({ items: all });
+  } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
 app.get('/api/top-artists', async (req,res) => {
@@ -98,19 +119,32 @@ app.get('/api/recent', async (req,res) => {
 app.get('/api/search', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
   const { q, type='track', limit=6 } = req.query;
-  try { res.json((await spGet(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}&market=FR`, t)).data); }
+  try { res.json((await spGet(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`, t)).data); }
   catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
+// Search artists in full Spotify catalog
+app.get('/api/search-artists', async (req,res) => {
+  const t = req.headers.authorization?.split(' ')[1];
+  const { q } = req.query;
+  try {
+    const { data } = await spGet(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=artist&limit=12`, t);
+    res.json(data);
+  } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
+});
+
+// Artist top tracks — no market restriction so US artists work
 app.get('/api/artists/:id/tracks', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
-  try { res.json((await spGet(`https://api.spotify.com/v1/artists/${req.params.id}/top-tracks?market=FR`, t)).data); }
-  catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
+  try {
+    const { data } = await spGet(`https://api.spotify.com/v1/artists/${req.params.id}/top-tracks`, t);
+    res.json(data);
+  } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
 app.get('/health', (_, res) => res.json({ ok:true }));
 
-// WebSocket
+// ── WebSocket 1v1 ─────────────────────────────────────────
 const rooms = new Map();
 function send(ws, obj) { if (ws?.readyState===1) ws.send(JSON.stringify(obj)); }
 
@@ -163,4 +197,4 @@ function handleWS(ws, msg) {
 }
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`✅ music-theory server :${PORT}`));
+server.listen(PORT, () => console.log(`✅ music-theory :${PORT}`));
