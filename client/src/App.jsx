@@ -1,20 +1,15 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api, spFetch as spDirect } from './api'; // spDirect partage le rate limiter global
-
 // Images PNG
 const MIX_SOLO_URL = new URL('./mix-solo.png', import.meta.url).href;
 const MIX_1V1_URL  = new URL('./mix-1v1.png',  import.meta.url).href;
-
 // WebSocket URL — même host que l'API REST
 const WS_URL=(import.meta.env.VITE_API_URL||'http://localhost:3001')
   .replace('https://','wss://').replace('http://','ws://');
-
 // Frise — chaque année sélectionnable, labels affichés seulement en 0/5
 const YEAR_STEPS=Array.from({length:127},(_,i)=>1900+i); // 1900→2026
 const YN=126;
 const YEAR_LABELS=YEAR_STEPS.filter(y=>y%5===0||y===2026); // 1900,1905,...,2025,2026
-
-
 function saveTokens({access_token,refresh_token,expires_in}){
   localStorage.setItem('access_token',access_token);
   localStorage.setItem('refresh_token',refresh_token);
@@ -22,7 +17,6 @@ function saveTokens({access_token,refresh_token,expires_in}){
 }
 function isLoggedIn(){return!!localStorage.getItem('access_token');}
 function logout(){localStorage.clear();window.location.href='/';}
-
 const CSS=`
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 :root{
@@ -61,15 +55,15 @@ input::placeholder{color:var(--t3);}
 .tg{color:#34d399;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(52,211,153,.45);}
 .ta{color:#fbbf24;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(251,191,36,.45);}
 .tr{color:#f87171;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(248,113,113,.45);animation:tp .5s ease-in-out infinite;}
-/* Slider dual-thumb frise */
+/* ── Slider dual-thumb frise — taille fixe px pour zoom-proof ── */
 .rs{position:relative;height:24px;display:flex;align-items:center;}
 .rs input[type=range]{position:absolute;width:100%;height:4px;appearance:none;-webkit-appearance:none;background:transparent;pointer-events:none;outline:none;margin:0;padding:0;}
 .rs input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:white;cursor:pointer;pointer-events:auto;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:transform .1s;}
 .rs input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
+.rs input[type=range]::-webkit-slider-thumb:active{transform:scale(1.1);}
 .rs input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:white;cursor:pointer;pointer-events:auto;border:none;box-shadow:0 2px 8px rgba(0,0,0,.4);}
 .rs::before{content:'';position:absolute;left:9px;right:9px;height:4px;background:rgba(255,255,255,.12);border-radius:999px;}
 `;
-
 const IC={
   music:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>,
   link:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
@@ -88,7 +82,21 @@ const IC={
   x:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>,
   chevR:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>,
 };
-
+function MixCoverTemplate({mode,artistUrl}){
+  const tplUrl=mode==='solo'?MIX_SOLO_URL:MIX_1V1_URL;
+  return(
+    <div style={{position:'absolute',inset:0}}>
+      {artistUrl
+        ?<img src={artistUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',objectPosition:'top'}} alt="" crossOrigin="anonymous"/>
+        :<div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(135deg,#0f3460,#16213e)':'linear-gradient(135deg,#533483,#7b2d8b)'}}/>
+      }
+      {/* Overlay dégradé sur la photo */}
+      <div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(to bottom,rgba(10,5,30,.45),rgba(10,5,30,.62))':'linear-gradient(to bottom,rgba(30,5,30,.45),rgba(30,5,30,.62))'}}/>
+      {/* Template PNG par dessus */}
+      <img src={tplUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt=""/>
+    </div>
+  );
+}
 function DynBg({url,mode}){
   const f={
     neutral:'saturate(1.8) brightness(.35) blur(clamp(55px,7vw,110px))',
@@ -104,7 +112,6 @@ function DynBg({url,mode}){
     </div>
   );
 }
-
 function MysteryCover({url,sz}){
   const s=sz||'clamp(180px,22vh,320px)';
   return(
@@ -116,7 +123,6 @@ function MysteryCover({url,sz}){
     </div>
   );
 }
-
 function TopBar({label,user,center,onAv,onQuit,dark}){
   // dark=true (mode jeu, fond sombre) → fond plus opaque + bordure + ombre basse pour contraste
   const bg=dark?'rgba(0,0,0,.38)':'rgba(0,0,0,.14)';
@@ -139,7 +145,6 @@ function TopBar({label,user,center,onAv,onQuit,dark}){
     </div>
   );
 }
-
 function ProfileModal({user,onClose}){
   return(
     <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',alignItems:'flex-start',justifyContent:'flex-end',padding:'clamp(56px,5.5vh,72px) clamp(16px,1.5vw,28px) 0'}} onClick={onClose}>
@@ -168,7 +173,6 @@ function ProfileModal({user,onClose}){
     </div>
   );
 }
-
 function PlayerBar({track,paused,prog,onPause,onSeek,vol,onVolume,revealed,canSeek}){
   if(!track)return null;
   const dur=track.duration_ms||222000;
@@ -211,7 +215,6 @@ function PlayerBar({track,paused,prog,onPause,onSeek,vol,onVolume,revealed,canSe
     </div>
   );
 }
-
 function Pill({active,onClick,children,sm}){
   return(
     <button onClick={onClick} style={{padding:sm?'clamp(5px,.5vh,8px) clamp(10px,.9vw,16px)':'clamp(7px,.65vh,11px) clamp(14px,1.3vw,22px)',borderRadius:'999px',border:active?'none':'1px solid rgba(255,255,255,.12)',background:active?'rgba(255,255,255,.95)':'rgba(0,0,0,.14)',backdropFilter:active?'none':'var(--mRb)',WebkitBackdropFilter:active?'none':'var(--mRb)',color:active?'#000':'var(--t2)',fontSize:'clamp(11px,.78vw,15px)',fontWeight:500,cursor:'pointer',transition:'all .15s',outline:'none',boxShadow:active?'0 3px 14px rgba(255,255,255,.14)':'var(--le)'}}>
@@ -219,7 +222,6 @@ function Pill({active,onClick,children,sm}){
     </button>
   );
 }
-
 function rotatePool(tracks,rounds,spacing=5){
   const sh=[...tracks].sort(()=>Math.random()-.5);
   const res=[],rem=[...sh],rec=[];
@@ -232,7 +234,6 @@ function rotatePool(tracks,rounds,spacing=5){
   }
   return res;
 }
-
 export default function App(){
   const[screen,setScreen]=useState(isLoggedIn()?'home':'login');
   const[user,setUser]=useState(null);
@@ -302,7 +303,6 @@ export default function App(){
   const yearMaxRef=useRef(2026);
   useEffect(()=>{selArtsRef.current=selArts;},[selArts]);
   useEffect(()=>{roundsRef.current=rounds;},[rounds]);
-
   // Handle OAuth callback
   useEffect(()=>{
     if(window.location.pathname==='/callback'){
@@ -312,7 +312,6 @@ export default function App(){
       window.history.replaceState({},'','/');
     }
   },[]);
-
   // Load user data — using spDirect (direct Spotify calls)
   useEffect(()=>{
     if(screen==='login')return;
@@ -335,7 +334,6 @@ export default function App(){
       }catch(e){console.error('load',e);}
     })();
   },[screen==='login']);
-
   // Spotify Web Playback SDK
   useEffect(()=>{
     if(screen==='login')return;
@@ -354,11 +352,9 @@ export default function App(){
       const s=document.createElement('script');s.src='https://sdk.scdn.co/spotify-player.js';document.head.appendChild(s);
     }
   },[screen==='login']);
-
   // Sync refs pour WebSocket handler (toujours à jour)
   useEffect(()=>{durRef.current=dur;},[dur]);
   useEffect(()=>{roundsRef.current=rounds;},[rounds]);
-
   // ── WebSocket 1v1 ─────────────────────────────────────────────────────────
   // Handler WS (défini inline → toujours à jour via messageHandlerRef)
   const messageHandlerRef=useRef(null);
@@ -432,7 +428,6 @@ export default function App(){
         break;
     }
   };
-
   // Connexion WebSocket dès la connexion Spotify
   useEffect(()=>{
     if(screen==='login')return;
@@ -445,11 +440,9 @@ export default function App(){
     return()=>{ws.close();wsRef.current=null;};
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[screen==='login']);
-
   const sendWS=useCallback((obj)=>{
     if(wsRef.current?.readyState===1)wsRef.current.send(JSON.stringify(obj));
   },[]);
-
   // ── useEffect Mix 1v1 : build pool combiné quand guestArtists arrive ──────
   useEffect(()=>{
     if(!guestArtists)return;
@@ -480,14 +473,12 @@ export default function App(){
       .catch(e=>{setErr(`Erreur Mix 1v1: ${e.message}`);setLoading(false);setLoadingMsg('');setGuestArtists(null);});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[guestArtists]);
-
   // BG rotation
   useEffect(()=>{
     if(screen!=='home'||!topTracks.length)return;
     bgRef.current=setInterval(()=>setBgIdx(i=>(i+1)%Math.min(topTracks.length,20)),12000);
     return()=>clearInterval(bgRef.current);
   },[screen,topTracks]);
-
   // Game timer
   useEffect(()=>{
     clearInterval(timerRef.current);
@@ -506,7 +497,6 @@ export default function App(){
     },1000);
     return()=>clearInterval(timerRef.current);
   },[screen,revealed,paused]);
-
   // Progress counter
   useEffect(()=>{
     clearInterval(progRef.current);
@@ -514,47 +504,33 @@ export default function App(){
     progRef.current=setInterval(()=>setProg(p=>p+1),1000);
     return()=>clearInterval(progRef.current);
   },[screen,paused]);
-
   // ─── Artist search — spDirect calls Spotify API directly ───
   // Ref pour topArtists — évite de refirer l'effet à chaque chargement d'artiste
   const topArtistsRef = useRef([]);
   useEffect(()=>{ topArtistsRef.current=topArtists; },[topArtists]);
-
   useEffect(()=>{
     clearTimeout(artRef.current);
     if(artQ.length<2){setArtRes([]);return;}
     artRef.current=setTimeout(async()=>{
-      // spDirect = appel direct Spotify (bypass Railway → quota séparé du pool building)
-      // Fallback sur api.search (Railway) si direct échoue
-      const trySearch=async(q)=>{
-        try{
-          const r=await spDirect(`/search?q=${encodeURIComponent(q)}&type=artist&limit=6`);
-          return r.artists?.items||[];
-        }catch(e){
-          // Fallback Railway si spDirect échoue
-          try{
-            const r2=await api.search(q,'artist',6);
-            return r2.artists?.items||[];
-          }catch(e2){return[];}
-        }
-      };
       try{
-        const [items1,items2]=await Promise.all([
-          trySearch(`"${artQ}"`),  // exact
-          trySearch(artQ),          // fuzzy
-        ]);
-        const seen=new Set();
-        const combined=[...items1,...items2].filter(a=>{
-          if(seen.has(a.id))return false;seen.add(a.id);return true;
-        });
-        setArtRes(combined);
-        console.log('[MT] artist search:',combined.length,'résultats pour',artQ);
+        // api.search → Railway proxy → Spotify
+        // Pas de throttle client partagé avec pool building → toujours réactif
+        const r=await api.search(artQ,'artist',6);
+        const found=r.artists?.items||[];
+        console.log('[MT] artist search:',found.length,'résultats pour',artQ);
+        // Ne pas filtrer les top50 — l'user doit pouvoir les retrouver en recherche
+        setArtRes(found);
       }catch(e){
-        setArtRes([]);
+        if(e.message?.includes('429')){
+          // Rate limit : vider silencieusement, l'user peut réessayer
+          setArtRes([]);
+        }else{
+          console.warn('[MT] artist search error:',e.message);
+          setArtRes([]);
+        }
       }
-    },350);
+    },400);
   },[artQ]); // dépendance artQ seulement — topArtists via ref
-
   const playTrack=useCallback(async(track)=>{
     if(!deviceId||!track)return;
     const tok=localStorage.getItem('access_token');
@@ -589,7 +565,6 @@ export default function App(){
       }
     }catch(e){console.error('[MT] play error',e.message);}
   },[deviceId]);
-
   // ─── Queries par tranches de 3 ans + filtre artist: strict ─────────────
   const yearQueriesFor=(artistName,minY,maxY)=>{
     const queries=[];
@@ -602,15 +577,12 @@ export default function App(){
     queries.push(`artist:"${artistName}"`);
     return queries;
   };
-
-
   // ─── isMainArtist : artiste principal uniquement + exclure non-playable ─────
   const isMainArtist=(track,artistId,nameLow)=>{
     if(track.is_playable===false)return false;
     const first=track.artists?.[0];
     return first?.id===artistId||first?.name?.toLowerCase()===nameLow;
   };
-
   // ─── fetchAllSongs : catalogue complet pour chaque artiste sélectionné ──────
   // Stratégie : chaque année du range × 3 offsets + 6 pages générales
   // → tout ce que Spotify peut retourner pour cet artiste sur la période
@@ -654,8 +626,18 @@ export default function App(){
       }
     }
     return all;
-  };
 
+    
+          
+            
+    
+
+          
+          Expand Down
+    
+    
+  
+  };
   // ─── startGame : charge tout, vérifie, shuffle, lance ────────────────────────
   const startGame=useCallback(async()=>{
     setLoading(true);setLoadingMsg('Initialisation…');setErr('');
@@ -784,9 +766,7 @@ export default function App(){
     setScreen('game');setLoading(false);setLoadingMsg('');
     setTimeout(()=>{if(finalPool[0])playTrack(finalPool[0]);},500);
   },[mixPerso,selArts,yearMin,yearMax,rounds,dur,playTrack,fetchAllSongs,gMode,sendWS]);
-
   const doReveal=useCallback(()=>{clearInterval(timerRef.current);setRevealed(true);setScreen('reveal');},[]);
-
   const nextRound=useCallback(()=>{
     const n=cIdx+1;
     if(n>=pool.length){setScreen('end');return;}
@@ -794,11 +774,9 @@ export default function App(){
     setScreen('game');
     setTimeout(()=>{if(pool[n])playTrack(pool[n]);},200);
   },[cIdx,pool,dur,playTrack]);
-
   const handlePause=useCallback(()=>{
     setPaused(p=>{playerRef.current?.togglePlay();return!p;});
   },[]);
-
   // ── Sync refs (pour WebSocket handler) ────────────────────────────────────
   useEffect(()=>{doRevealRef.current=doReveal;},[doReveal]);
   useEffect(()=>{nextRoundRef.current=nextRound;},[nextRound]);
@@ -807,7 +785,6 @@ export default function App(){
   useEffect(()=>{fetchAllSongsRef.current=fetchAllSongs;},[fetchAllSongs]);
   useEffect(()=>{mixModeRef.current=mixMode;},[mixMode]);
   useEffect(()=>{yearMinRef.current=yearMin;yearMaxRef.current=yearMax;},[yearMin,yearMax]);
-
   const handleVolume=useCallback((v)=>{
     const safeVol=Math.max(0,Math.min(1,v));
     setVol(safeVol);
@@ -817,7 +794,6 @@ export default function App(){
       if(safeVol===0)playerRef.current.setVolume(0).catch(()=>{});
     }
   },[]);
-
   // Song autocomplete — keep using api.search (works through server)
   const handleAnswer=useCallback(async(val)=>{
     setAnswer(val);
@@ -827,7 +803,6 @@ export default function App(){
       try{const r=await api.search(val,'track',6);setResults(r.tracks?.items||[]);}catch(e){}
     },280);
   },[]);
-
   const selectAnswer=useCallback((t)=>{
     const curr=pool[cIdx];if(!curr)return;
     setResults([]);
@@ -841,11 +816,9 @@ export default function App(){
         }
     else setAnswer('');
   },[pool,cIdx,timer,dur,doReveal]);
-
   const toggleArtist=useCallback((a)=>{
     setSelArts(p=>p.find(x=>x.id===a.id)?p.filter(x=>x.id!==a.id):[...p,a]);
   },[]);
-
   const track=pool[cIdx]||null;
   const bgUrl=(screen==='game'||screen==='reveal')?track?.album?.images?.[0]?.url:topTracks[bgIdx]?.album?.images?.[0]?.url;
   const bgMode=screen==='game'?'game':screen==='reveal'?'reveal':'cycle';
@@ -863,7 +836,6 @@ export default function App(){
     :topArtists;
   const showSPRes=isSearching&&artRes.length>0;
   const showSearching=isSearching&&artRes.length===0;
-
   // Barre de recherche artiste dans la TopBar (screen==='artists')
   const ArtistSearchBar=(
     <div style={{position:'relative',width:'clamp(260px,32vw,560px)'}}>
@@ -895,7 +867,6 @@ export default function App(){
       )}
     </div>
   );
-
   const SearchBar=(
     <div style={{position:'relative',width:'clamp(260px,26vw,500px)'}}>
       <div style={{display:'flex',alignItems:'center',gap:'clamp(7px,.55vw,11px)',padding:'clamp(6px,.6vh,10px) clamp(12px,1vw,18px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)',borderRadius:'999px'}}>
@@ -920,7 +891,6 @@ export default function App(){
       )}
     </div>
   );
-
   // ── LOGIN ─────────────────────────────────────────────────
   if(screen==='login'){return(<>
     <style>{CSS}</style>
@@ -937,12 +907,10 @@ export default function App(){
       </div>
     </div>
   </>);}
-
   return(<>
     <style>{CSS}</style>
     <DynBg url={bgUrl} mode={bgMode}/>
     {showProfile&&<ProfileModal user={user} onClose={()=>setShowProfile(false)}/>}
-
     {/* ── LOADING OVERLAY — affiché pendant le chargement du catalogue ── */}
     {loading&&loadingMsg&&<div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.85)',backdropFilter:'blur(32px)',WebkitBackdropFilter:'blur(32px)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'clamp(16px,2vh,28px)'}}>
       <div style={{textAlign:'center',maxWidth:'min(480px,85vw)',padding:'0 clamp(20px,3vw,40px)'}}>
@@ -955,7 +923,6 @@ export default function App(){
         </p>
       </div>
     </div>}
-
     {/* TOP BAR */}
     {screen==='home'
       ?<div style={{position:'fixed',top:0,left:0,right:0,zIndex:100,height:'var(--BAR)',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 clamp(16px,1.5vw,32px)',background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)'}}>
@@ -983,10 +950,8 @@ export default function App(){
           }:null}
           dark={screen==='game'||screen==='reveal'}/>
     }
-
     {/* CONTENT */}
     <div style={{position:'relative',zIndex:10,height:'100vh',paddingTop:topPad,paddingBottom:botPad,overflow:'hidden'}}>
-
       {/* ── HOME */}
       {screen==='home'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(18px,2vh,36px) clamp(20px,2vw,40px)'}}>
         <div className="fade" style={{width:'100%',maxWidth:'min(560px,50vw)'}}>
@@ -1027,7 +992,6 @@ export default function App(){
           </div>
         </div>
       </div>}
-
       {/* ── CONFIG */}
       {screen==='config'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(18px,1.8vh,32px) clamp(20px,2vw,40px)'}}>
         <div className="fade" style={{width:'100%',maxWidth:'min(500px,44vw)'}}>
@@ -1054,13 +1018,10 @@ export default function App(){
           </div>
         </div>
       </div>}
-
       {/* ── ARTISTS */}
       {screen==='artists'&&<div style={{height:'100%',display:'flex',flexDirection:'column',overflow:'hidden'}}>
-
         {/* ════ ROW : colonne gauche + colonne droite ════ */}
         <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
-
           {/* ── COLONNE GAUCHE : Mix personnalisés ─────────── */}
           {/* Colonne gauche — overflow:hidden pour clipper les covers à la limite de la zone */}
           <div style={{width:'clamp(190px,18vw,280px)',flexShrink:0,overflow:'hidden',padding:'clamp(14px,1.6vh,24px) clamp(12px,1.2vw,18px)',display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(10px,1.1vh,16px)',justifyContent:'flex-start'}}>
@@ -1073,21 +1034,21 @@ export default function App(){
               const active=mixPerso&&mixMode===mode;
               const bgImg=topArtists[mode==='solo'?mixCoverIdx.solo:mixCoverIdx.v1]?.images?.[0]?.url;
                   return(
-                <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'min(100%,clamp(160px,16vw,250px))',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
-                  {/* Template CSS (reproduit le design sans fichier externe) */}
-                  <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
-                  {/* Indicateur sélectionné */}
-                  {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓ Sélectionné</div>}
-                  {/* Label mode en bas */}
-                  <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'clamp(8px,.8vh,12px)',background:'linear-gradient(to top,rgba(0,0,0,.7),transparent)',pointerEvents:'none'}}>
-                    <div style={{fontSize:'clamp(11px,.9vw,16px)',fontWeight:700,color:'white'}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
-                    <div style={{fontSize:'clamp(8px,.62vw,12px)',color:'rgba(255,255,255,.6)'}}>{mode==='solo'?"Un mix basé sur tes écoutes Spotify":"Vos goûts musicaux fusionnés en un mix"}</div>
+                <div key={mode} style={{cursor:'pointer',width:'min(100%,clamp(160px,16vw,250px))',flexShrink:0}} onClick={()=>{setMixPerso(true);setMixMode(mode);}}>
+                  {/* Cover 100% visible — aucun texte par dessus */}
+                  <div style={{position:'relative',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s'}}>
+                    <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
+                    {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓</div>}
+                  </div>
+                  {/* Texte SOUS la cover */}
+                  <div style={{padding:'clamp(7px,.7vh,11px) clamp(4px,.35vw,6px) 0'}}>
+                    <div style={{fontSize:'clamp(12px,.95vw,17px)',fontWeight:700,color:'var(--t1)',marginBottom:'clamp(2px,.2vh,4px)'}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
+                    <div style={{fontSize:'clamp(9px,.65vw,13px)',color:'var(--t3)',lineHeight:1.35}}>{mode==='solo'?'Un mix basé sur tes écoutes Spotify':'Vos goûts musicaux fusionnés en un mix'}</div>
                   </div>
                 </div>
               );
             })}
           </div>
-
           {/* ── COLONNE DROITE : flex-col — scroll sur grille, frise fixée en bas ─ */}
           <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
             {/* Zone scrollable : titre + grille */}
@@ -1116,7 +1077,6 @@ export default function App(){
               </div>{/* fin grille */}
               </div>{/* fin maxWidth scroll */}
             </div>{/* fin zone scrollable */}
-
             {/* ── Frise chronologique — hors du scroll, toujours visible en bas ─── */}
             <div style={{flexShrink:0,padding:'clamp(12px,1.4vh,20px) clamp(24px,2.4vw,42px)',background:'transparent',paddingTop:'clamp(10px,1.2vh,18px)'}}>
               <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
@@ -1132,24 +1092,23 @@ export default function App(){
                   </div>
                 </div>
                 {/* Slider index-based — thumb et labels parfaitement alignés */}
-                <div style={{padding:'0 clamp(10px,1vw,14px)',marginBottom:'clamp(6px,.6vh,10px)'}}>
+                <div style={{padding:'0 9px',marginBottom:8}}>
                   <div className="rs">
-                    {/* Barre remplie basée sur les indices */}
-                    <div style={{position:'absolute',top:0,bottom:0,left:`${minIdx/YN*100}%`,width:`${(maxIdx-minIdx)/YN*100}%`,background:'rgba(255,255,255,.75)',borderRadius:'999px',pointerEvents:'none'}}/>
+                    {/* Fill bar — formule calc pour alignement pixel-perfect avec les thumbs */}
+                    <div style={{position:'absolute',left:`calc(${minIdx/YN} * (100% - 18px) + 9px)`,width:`calc(${(maxIdx-minIdx)/YN} * (100% - 18px))`,height:4,background:'rgba(255,255,255,.8)',borderRadius:'999px',pointerEvents:'none'}}/>
                     <input type="range" min={0} max={YN} step={1} value={minIdx} onChange={e=>setMinIdx(Math.min(+e.target.value,maxIdx))} style={{zIndex:minIdx>YN-2?3:2}}/>
                     <input type="range" min={0} max={YN} step={1} value={maxIdx} onChange={e=>setMaxIdx(Math.max(+e.target.value,minIdx))} style={{zIndex:3}}/>
                   </div>
                 </div>
-                {/* Labels : seuls les 0/5 affichés, positionnés précisément */}
-                <div style={{position:'relative',height:'clamp(14px,1.4vh,18px)',padding:'0 clamp(10px,1vw,14px)'}}>
+                {/* Labels — calc() = exactement alignés avec les thumbs, résiste au zoom */}
+                <div style={{position:'relative',height:18,padding:'0 9px'}}>
                   {YEAR_LABELS.map(y=>{
                     const i=y-1900;
-                    const pct=i/YN*100;
                     const active=i===minIdx||i===maxIdx;
                     return(
                       <span key={y}
                         onClick={()=>{if(Math.abs(i-minIdx)<=Math.abs(i-maxIdx))setMinIdx(i);else setMaxIdx(i);}}
-                        style={{position:'absolute',left:`${pct}%`,transform:'translateX(-50%)',fontSize:'clamp(7px,.55vw,10px)',color:active?'rgba(255,255,255,.9)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:active?700:400,whiteSpace:'nowrap'}}
+                        style={{position:'absolute',left:`calc(${i/YN} * (100% - 18px) + 9px)`,transform:'translateX(-50%)',fontSize:10,color:active?'rgba(255,255,255,.9)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:active?700:400,whiteSpace:'nowrap',fontFamily:'var(--F)'}}
                         onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
                         onMouseLeave={e=>e.currentTarget.style.color=active?'rgba(255,255,255,.9)':'var(--t4)'}>{y}</span>
                     );
@@ -1158,9 +1117,7 @@ export default function App(){
               </div>{/* fin maxWidth frise */}
             </div>{/* fin frise */}
           </div>{/* fin col droite */}
-
         </div>{/* fin row */}
-
         {/* ── Barre inférieure ─── */}
         {/* Barre toujours visible — Lancer grisé tant qu'aucun artiste/mix */}
         <div style={{flexShrink:0,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'rgba(8,6,5,.98)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.12)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
@@ -1183,7 +1140,6 @@ export default function App(){
           </button>
         </div>
       </div>}
-
             {/* ── WAITING 1v1 */}
       {screen==='waiting'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(20px,2vh,40px)'}}>
         <div className="fade" style={{textAlign:'center',maxWidth:'min(440px,80vw)'}}>
@@ -1221,7 +1177,6 @@ export default function App(){
           )}
         </div>
       </div>}
-
       {/* ── GAME */}
       {screen==='game'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(22px,3vw,60px)',padding:'clamp(14px,1.5vh,26px)'}}>
         <MysteryCover url={track?.album?.images?.[0]?.url} sz="clamp(180px,22vh,340px)"/>
@@ -1258,7 +1213,6 @@ export default function App(){
           </div>
         </div>
       </div>}
-
       {/* ── REVEAL */}
       {screen==='reveal'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(14px,1.5vh,26px)'}}>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(14px,1.8vh,28px)',width:'100%',maxWidth:'min(420px,38vw)'}}>
@@ -1279,7 +1233,6 @@ export default function App(){
               :<p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center',color:'var(--t3)'}}>Passé — <span style={{color:'rgba(248,113,113,.7)'}}>+0 pts</span></p>
             }
           </div>
-
           {/* En 1v1, seul le host clique Suivant — ça broadcast aux deux */}
           {(!roomRole||roomRole==='host')&&<button onClick={()=>{
             if(roomRole==='host')sendWS({type:'host_control',action:'next'});
@@ -1290,7 +1243,6 @@ export default function App(){
           {roomRole==='guest'&&<p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',animation:'fadeUp .4s ease .74s both',opacity:0}}>En attente du host…</p>}
         </div>
       </div>}
-
       {/* ── END */}
       {screen==='end'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(20px,2vh,40px)'}}>
         <div className="scalein" style={{textAlign:'center'}}>
@@ -1304,7 +1256,6 @@ export default function App(){
         </div>
       </div>}
     </div>
-
     {showPB&&<PlayerBar
       track={track} paused={paused} prog={prog} vol={vol}
       revealed={revealed} canSeek={revealed}
