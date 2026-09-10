@@ -106,7 +106,7 @@ export const api = {
   },
   topArtists: (tr = 'medium_term') => spFetch(`/me/top/artists?time_range=${tr}&limit=50`),
   // Search via Railway — PAS de throttle client, réactif pour la recherche artiste
-  search: (q, type = 'track', limit = 6, offset = 0) =>
+  search: (q, type = 'track', limit = 50, offset = 0) =>
     apiFetch(`/api/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}&offset=${offset}`),
   artistTracks: (id) => apiFetch(`/api/artists/${id}/tracks`),
   artistAllTracks: (id) => apiFetch(`/api/artists/${id}/all-tracks`),
