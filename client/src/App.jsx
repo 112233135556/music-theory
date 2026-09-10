@@ -303,6 +303,7 @@ export default function App(){
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
   const[loadingMsg,setLoadingMsg]=useState('');
+  const[guestArtists,setGuestArtists]=useState(null); // déclenche le build du pool Mix 1v1
   const[roundSolved,setRoundSolved]=useState(false);
   // ── 1v1 states ──────────────────────────────────────────────────────────
   const[wsOk,setWsOk]=useState(false);
@@ -336,6 +337,11 @@ export default function App(){
   const handlePauseRef=useRef(null);
   const playTrackRef=useRef(null);
   const durRef=useRef(30);
+  const hostArtistsRef=useRef([]);   // top 50 artistes du host (Mix 1v1)
+  const mixModeRef=useRef('solo');   // ref stable pour WS handler
+  const fetchAllSongsRef=useRef(null); // ref vers fetchAllSongs
+  const yearMinRef=useRef(1900);
+  const yearMaxRef=useRef(2026);
   useEffect(()=>{selArtsRef.current=selArts;},[selArts]);
   useEffect(()=>{roundsRef.current=rounds;},[rounds]);
 
@@ -399,6 +405,11 @@ export default function App(){
         break;
       case 'guest_joined':{
         setOpponentInfo({name:msg.name||'Joueur 2'});
+        if(mixModeRef.current==='1v1'){
+          // Mix 1v1 : attendre les artistes du guest (ils arrivent via share_artists → guest_artists)
+          break;
+        }
+        // Mode normal : envoyer pool existant au guest immédiatement
         const pool=tempPoolRef.current;
         send({type:'game_start',tracks:pool});
         setPool(pool);setCIdx(0);setScore(0);setOpponentScore(0);
@@ -406,6 +417,10 @@ export default function App(){
         setRoundSolved(false);
         setScreen('game');
         setTimeout(()=>{if(pool[0])playTrackRef.current?.(pool[0]);},500);
+        break;}
+      case 'guest_artists':{
+        // Host reçoit top artistes du guest → déclenche le useEffect qui build le pool combiné
+        setGuestArtists(msg.artists||[]);
         break;}
       case 'game_start':{
         const tr=msg.tracks||[];
@@ -428,7 +443,17 @@ export default function App(){
       case 'room_joined':
         setRoomCode((msg.code||'').toUpperCase());
         setRoomRole('guest');
-        setOpponentInfo({name:msg.hostName||'Host'}); // l'adversaire du guest c'est le host
+        setOpponentInfo({name:msg.hostName||'Host'});
+        if(msg.settings?.mixMode==='1v1'){
+          // Mix 1v1 : envoyer automatiquement les top 50 artistes (1 an) au host
+          spDirect('/me/top/artists?time_range=medium_term&limit=50')
+            .then(data=>{
+              wsRef.current?.send(JSON.stringify({type:'share_artists',artists:data.items||[]}));
+            })
+            .catch(()=>{
+              wsRef.current?.send(JSON.stringify({type:'share_artists',artists:[]}));
+            });
+        }
         setScreen('waiting');
         break;
       case 'opponent_left':
@@ -458,6 +483,37 @@ export default function App(){
   const sendWS=useCallback((obj)=>{
     if(wsRef.current?.readyState===1)wsRef.current.send(JSON.stringify(obj));
   },[]);
+
+  // ── useEffect Mix 1v1 : build pool combiné quand guestArtists arrive ──────
+  useEffect(()=>{
+    if(!guestArtists)return;
+    const hostArts=hostArtistsRef.current||[];
+    const seen=new Set(hostArts.map(a=>a.id));
+    const combined=[...hostArts,...guestArtists.filter(a=>!seen.has(a.id))];
+    console.log(`[MT] Mix 1v1: ${combined.length} artistes combinés`);
+    const minY=yearMinRef.current, maxY=yearMaxRef.current;
+    setLoading(true);
+    setLoadingMsg(`Mix 1v1 — chargement ${combined.length} artistes…`);
+    fetchAllSongsRef.current?.(combined,minY,maxY,(msg)=>setLoadingMsg(msg))
+      .then(rawTracks=>{
+        const playable=rawTracks.filter(t=>t.is_playable!==false);
+        const base=playable.length>0?playable:rawTracks;
+        const inRange=base.filter(t=>{
+          const y=parseInt(t.album?.release_date?.slice(0,4)||'0');
+          if(y===0)return true;if(minY===maxY)return y===minY;return y>=minY&&y<=maxY;
+        });
+        const pool=inRange.length>0?inRange:base;
+        const finalPool=[...pool].sort(()=>Math.random()-0.5).slice(0,roundsRef.current);
+        wsRef.current?.send(JSON.stringify({type:'game_start',tracks:finalPool}));
+        setPool(finalPool);setCIdx(0);setScore(0);setOpponentScore(0);
+        setTimer(durRef.current);setRevealed(false);setAnswer('');setProg(0);setRoundSolved(false);
+        setLoading(false);setLoadingMsg('');setGuestArtists(null);
+        setScreen('game');
+        setTimeout(()=>{if(finalPool[0])playTrackRef.current?.(finalPool[0]);},500);
+      })
+      .catch(e=>{setErr(`Erreur Mix 1v1: ${e.message}`);setLoading(false);setLoadingMsg('');setGuestArtists(null);});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[guestArtists]);
 
   // BG rotation
   useEffect(()=>{
@@ -608,7 +664,43 @@ export default function App(){
     setLoading(true);setLoadingMsg('Initialisation…');setErr('');
     let rawTracks=[];
     try{
-      if(mixPerso){
+      // ─── Validation Mix 1v1 en mode solo ────────────────────────────────
+      if(mixPerso&&mixMode==='1v1'&&gMode!=='1v1'){
+        setErr('Le Mix 1v1 nécessite une partie en mode 1v1. Va dans la config et sélectionne "1 vs 1".');
+        setLoading(false);setLoadingMsg('');return;
+      }
+      if(mixPerso&&mixMode==='1v1'&&gMode==='1v1'){
+        // Mix 1v1 : charger SEULEMENT les artistes du host (pas les sons — le pool viendra après)
+        setLoadingMsg('Chargement de tes artistes…');
+        try{
+          const data=await spDirect('/me/top/artists?time_range=medium_term&limit=50');
+          hostArtistsRef.current=data.items||[];
+          console.log(`[MT] Host top artists: ${hostArtistsRef.current.length}`);
+        }catch(e){hostArtistsRef.current=[];}
+        setLoadingMsg(`${hostArtistsRef.current.length} artistes chargés — Création de la room…`);
+        // Créer la room (pool vide pour l'instant)
+        tempPoolRef.current=[];
+        setTempPool([]);
+        setRoomRole('host');
+        setRoomCode('');
+        let wsR=wsRef.current?.readyState===1;
+        if(!wsR){
+          try{
+            const ws=new WebSocket(WS_URL);wsRef.current=ws;
+            ws.onmessage=(e)=>{try{messageHandlerRef.current?.(JSON.parse(e.data));}catch(err){}};
+            ws.onclose=()=>setWsOk(false);
+            wsR=await new Promise(res=>{ws.onopen=()=>{setWsOk(true);res(true);};ws.onerror=()=>res(false);setTimeout(()=>res(false),5000);});
+          }catch(e){wsR=false;}
+        }
+        if(!wsR){setErr('Impossible de se connecter au serveur 1v1.');setLoading(false);setLoadingMsg('');return;}
+        wsRef.current.send(JSON.stringify({type:'create_room',settings:{rounds:roundsRef.current,dur,mixMode:'1v1'},hostName:user?.display_name||'Host'}));
+        let waited=0;
+        while(!roomCodeRef.current&&waited<40){await new Promise(r=>setTimeout(r,100));waited++;}
+        setLoading(false);setLoadingMsg('');
+        setScreen('waiting');
+        return; // Pool sera construit quand guest envoie ses artistes
+      }
+      if(mixPerso&&mixMode==='solo'){
         setLoadingMsg('Chargement de tes écoutes Spotify…');
         const[s,m,l]=await Promise.all([
           spDirect('/me/top/tracks?time_range=short_term&limit=50'),
@@ -715,6 +807,9 @@ export default function App(){
   useEffect(()=>{nextRoundRef.current=nextRound;},[nextRound]);
   useEffect(()=>{handlePauseRef.current=handlePause;},[handlePause]);
   useEffect(()=>{playTrackRef.current=playTrack;},[playTrack]);
+  useEffect(()=>{fetchAllSongsRef.current=fetchAllSongs;},[fetchAllSongs]);
+  useEffect(()=>{mixModeRef.current=mixMode;},[mixMode]);
+  useEffect(()=>{yearMinRef.current=yearMin;yearMaxRef.current=yearMax;},[yearMin,yearMax]);
 
   const handleVolume=useCallback((v)=>{
     const safeVol=Math.max(0,Math.min(1,v));
