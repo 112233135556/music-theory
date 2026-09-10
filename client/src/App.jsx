@@ -1,9 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from './api';
 
-// Images PNG placées dans client/src/ — Vite les bundle automatiquement
+// Images PNG
 const MIX_SOLO_URL = new URL('./mix-solo.png', import.meta.url).href;
 const MIX_1V1_URL  = new URL('./mix-1v1.png',  import.meta.url).href;
+
+// Frise chronologique — constantes module (stable entre renders)
+const YEAR_STEPS=[1900,1910,1920,1930,1940,1950,1960,1970,1980,1990,1995,2000,2005,2010,2015,2020,2023,2026];
+const YN=YEAR_STEPS.length-1; // 17
 
 // ─── spDirect : appelle Spotify directement (bypasse le serveur pour les artistes)
 // Le token refresh passe par le serveur (besoin du client_secret).
@@ -293,8 +297,10 @@ export default function App(){
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
   const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
-  const[yearMin,setYearMin]=useState(1980);
-  const[yearMax,setYearMax]=useState(2026);
+  const[minIdx,setMinIdx]=useState(12); // 2005 (index dans YEAR_STEPS)
+  const[maxIdx,setMaxIdx]=useState(YN); // 2026
+  const yearMin=YEAR_STEPS[minIdx];
+  const yearMax=YEAR_STEPS[maxIdx];
   const[joinCode,setJoinCode]=useState('');
   const[joinOpen,setJoinOpen]=useState(false);
   const[err,setErr]=useState('');
@@ -423,34 +429,45 @@ export default function App(){
           spDirect('/me/top/tracks?time_range=medium_term&limit=50'),
           spDirect('/me/top/tracks?time_range=long_term&limit=50'),
         ]);
+        // Interleave les 3 périodes pour briser l'ordre popularité Spotify
         const seen=new Set();
-        tracks=[...(s.items||[]),...(m.items||[]),...(l.items||[])].filter(t=>{
-          if(seen.has(t.id))return false;seen.add(t.id);return true;
-        });
+        const s_=s.items||[], m_=m.items||[], l_=l.items||[];
+        const maxL=Math.max(s_.length,m_.length,l_.length);
+        for(let i=0;i<maxL;i++){
+          for(const list of[s_,m_,l_]){
+            if(list[i]&&!seen.has(list[i].id)){seen.add(list[i].id);tracks.push(list[i]);}
+          }
+        }
       }catch(e){
         console.error('mix pool error:',e.message);
         tracks=topTracks; // fallback to already loaded
       }
     }else{
-      for(const a of selArts){
-        let artTracks=[];
-        // APPROCHE 1: top-tracks via serveur (endpoint /api/artists/:id/tracks)
+        for(const a of selArts){
+        const artTracks=[];
+        // Source 1 : top-tracks (10 sons)
+        try{ const d=await api.artistTracks(a.id); artTracks.push(...(d.tracks||[])); }catch(e){}
+        // Source 2 : search offset 0 (20 sons)
         try{
-          const d=await api.artistTracks(a.id);
-          artTracks=d.tracks||[];
-          console.log('[MT] artistTracks via server for',a.name,':',artTracks.length);
-        }catch(e1){
-          console.warn('[MT] artistTracks failed:',e1.message,'; fallback search...');
-          // APPROCHE 2: search via serveur (même endpoint que autocomplete sons)
+          const r=await api.search(a.name,'track',20);
+          artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
+        }catch(e){}
+        // Source 3 : search offset 20 via spDirect (20 sons supplémentaires)
+        try{
+          const r=await spDirect(`/search?q=${encodeURIComponent(a.name)}&type=track&limit=20&offset=20`);
+          artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
+        }catch(e){}
+        // Source 4 : search offset 40 (encore plus)
+        try{
+          const r=await spDirect(`/search?q=${encodeURIComponent(a.name)}&type=track&limit=20&offset=40`);
+          artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
+        }catch(e){}
+        // Si filtre artiste trop strict (artiste peu connu), prendre tous les résultats
+        if(artTracks.length<5){
           try{
-            const r=await api.search(a.name,'track',6);
-            const items=r.tracks?.items||[];
-            artTracks=items.filter(t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase()));
-            if(!artTracks.length) artTracks=items; // si filtre trop strict, prendre tout
-            console.log('[MT] search fallback for',a.name,':',artTracks.length);
-          }catch(e2){
-            console.error('[MT] both methods failed for',a.name,':',e2.message);
-          }
+            const r=await api.search(a.name,'track',20);
+            artTracks.push(...(r.tracks?.items||[]));
+          }catch(e){}
         }
         tracks.push(...artTracks);
       }
@@ -462,14 +479,17 @@ export default function App(){
     // Filtrer par période de sortie
     const inRange=unique.filter(t=>{
       const y=parseInt(t.album?.release_date?.slice(0,4)||'0');
-      if(y===0)return true; // garder si pas de date
+      if(y===0)return true;
+      if(yearMin===yearMax)return y===yearMin; // année unique exacte
       return y>=yearMin&&y<=yearMax;
     });
     if(!inRange.length){
-      setErr(`Aucun son trouvé entre ${yearMin} et ${yearMax}. Élargis la période.`);
+      setErr(`Aucun son entre ${yearMin} et ${yearMax}. Élargis la période.`);
       return[];
     }
-    return rotatePool(inRange,rounds,5);
+    // Prendre rounds sons — si le pool est plus petit, prendre tout
+    const target=Math.min(rounds,inRange.length);
+    return rotatePool(inRange,target,5);
   },[selArts,mixPerso,topTracks,rounds,yearMin,yearMax]);
 
   const startGame=useCallback(async()=>{
@@ -525,7 +545,7 @@ export default function App(){
   const selectAnswer=useCallback((t)=>{
     const curr=pool[cIdx];if(!curr)return;
     setResults([]);
-    if(t.id===curr.id){setScore(s=>s+Math.max(10,Math.round((timer/dur)*1000)));doReveal();}
+    if(t.id===curr.id){setScore(s=>s+Math.max(1,Math.round((timer/dur)*5)));doReveal();}
     else setAnswer('');
   },[pool,cIdx,timer,dur,doReveal]);
 
@@ -637,7 +657,13 @@ export default function App(){
           user={user}
           center={screen==='game'?SearchBar:screen==='artists'?ArtistSearchBar:null}
           onAv={()=>setShowProfile(p=>!p)}
-          onQuit={(screen==='game'||screen==='reveal')?()=>{clearInterval(timerRef.current);setScreen('home');}:null}
+          onQuit={(screen==='game'||screen==='reveal')?()=>{
+            clearInterval(timerRef.current);
+            clearInterval(progRef.current);
+            playerRef.current?.pause().catch(()=>{});
+            setMinIdx(12);setMaxIdx(YN); // reset frise
+            setScreen('home');
+          }:null}
           dark={screen==='game'||screen==='reveal'}/>
     }
 
@@ -693,7 +719,7 @@ export default function App(){
             <div className="g2" style={{borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(13px,1.4vh,21px) clamp(15px,1.4vw,24px)'}}>
               <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',marginBottom:'clamp(10px,1vh,16px)',fontWeight:500}}>Manches</p>
               <div style={{display:'flex',alignItems:'center',gap:'clamp(14px,1.4vw,24px)'}}>
-                <button onClick={()=>setRounds(r=>Math.max(1,r-5))} style={{width:'clamp(28px,2.5vh,38px)',height:'clamp(28px,2.5vh,38px)',borderRadius:'50%',background:'rgba(0,0,0,.14)',border:'none',color:'var(--t1)',fontSize:'clamp(16px,1.5vh,22px)',cursor:'pointer',boxShadow:'var(--le)',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                <button onClick={()=>setRounds(r=>Math.max(5,r-5))} style={{width:'clamp(28px,2.5vh,38px)',height:'clamp(28px,2.5vh,38px)',borderRadius:'50%',background:'rgba(0,0,0,.14)',border:'none',color:'var(--t1)',fontSize:'clamp(16px,1.5vh,22px)',cursor:'pointer',boxShadow:'var(--le)',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
                 <span style={{fontSize:'clamp(24px,2.6vw,42px)',fontWeight:700,minWidth:'clamp(46px,4.2vw,68px)',textAlign:'center',letterSpacing:'-.03em',fontVariantNumeric:'tabular-nums'}}>{rounds}</span>
                 <button onClick={()=>setRounds(r=>r+5)} style={{width:'clamp(28px,2.5vh,38px)',height:'clamp(28px,2.5vh,38px)',borderRadius:'50%',background:'rgba(0,0,0,.14)',border:'none',color:'var(--t1)',fontSize:'clamp(16px,1.5vh,22px)',cursor:'pointer',boxShadow:'var(--le)',display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
               </div>
@@ -714,10 +740,11 @@ export default function App(){
         <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
 
           {/* ── COLONNE GAUCHE : Mix personnalisés ─────────── */}
-          <div style={{width:'clamp(200px,20vw,300px)',flexShrink:0,overflowY:'auto',padding:'clamp(14px,1.6vh,24px) clamp(14px,1.4vw,20px)',borderRight:'1px solid rgba(255,255,255,.07)',display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.3vh,20px)'}}>
-            <div style={{width:'100%'}}>
-              <h2 style={{fontSize:'clamp(14px,1.3vw,22px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(3px,.3vh,6px)'}}>Mix personnalisés</h2>
-              <p style={{fontSize:'clamp(9px,.67vw,13px)',color:'var(--t3)'}}>Basé sur tes écoutes Spotify</p>
+          {/* Colonne gauche — overflow:hidden pour clipper les covers à la limite de la zone */}
+          <div style={{width:'clamp(190px,18vw,280px)',flexShrink:0,overflow:'hidden',padding:'clamp(14px,1.6vh,24px) clamp(12px,1.2vw,18px)',display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(10px,1.1vh,16px)'}}>
+            <div style={{width:'100%',marginBottom:'clamp(6px,.6vh,10px)'}}>
+              <h2 style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.92,marginBottom:'clamp(5px,.5vh,8px)'}}>Mix</h2>
+              <p style={{fontSize:'clamp(9px,.67vw,12px)',color:'var(--t3)'}}>Basé sur tes écoutes Spotify</p>
             </div>
             {/* Cards Solo + 1v1 */}
             {['solo','1v1'].map(mode=>{
@@ -764,37 +791,36 @@ export default function App(){
             </div>{/* fin zone scrollable */}
 
             {/* ── Frise chronologique — hors du scroll, toujours visible en bas ─── */}
-            <div style={{flexShrink:0,padding:'clamp(12px,1.4vh,20px) clamp(24px,2.4vw,42px)',borderTop:'1px solid rgba(255,255,255,.07)',background:'rgba(0,0,0,.25)',backdropFilter:'blur(16px)',WebkitBackdropFilter:'blur(16px)'}}>
+            <div style={{flexShrink:0,padding:'clamp(12px,1.4vh,20px) clamp(24px,2.4vw,42px)',borderTop:'1px solid rgba(255,255,255,.07)',background:'rgba(10,8,6,.97)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)'}}>
               <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
-                <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'clamp(14px,1.6vh,22px)',gap:'clamp(12px,1.2vw,20px)'}}>
+                <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'clamp(10px,1.1vh,16px)',gap:'clamp(12px,1.2vw,20px)'}}>
                   <div>
-                    <h3 style={{fontSize:'clamp(18px,2vw,32px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.95,marginBottom:'clamp(5px,.5vh,8px)'}}>Période de sortie</h3>
-                    <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)'}}>Filtre les sons par année de release</p>
+                    <h3 style={{fontSize:'clamp(16px,1.8vw,28px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.95,marginBottom:'clamp(4px,.4vh,7px)'}}>Période de sortie</h3>
+                    <p style={{fontSize:'clamp(10px,.72vw,13px)',color:'var(--t3)'}}>Filtre les sons par année de release</p>
                   </div>
                   <div style={{textAlign:'right',flexShrink:0}}>
-                    <span style={{fontSize:'clamp(20px,2.4vw,40px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMin}</span>
-                    <span style={{fontSize:'clamp(12px,1.4vw,22px)',fontWeight:400,color:'var(--t3)',margin:'0 clamp(5px,.45vw,9px)'}}>—</span>
-                    <span style={{fontSize:'clamp(20px,2.4vw,40px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMax}</span>
-                  </div>
-                </div>{/* fin flex header frise */}
-                <div style={{padding:'0 clamp(10px,1vw,16px)',marginBottom:'clamp(10px,1vh,14px)'}}>
-                  <div className="rs">
-                    <div style={{position:'absolute',top:0,bottom:0,left:`${(yearMin-1900)/(2026-1900)*100}%`,width:`${(yearMax-yearMin)/(2026-1900)*100}%`,background:'rgba(255,255,255,.75)',borderRadius:'999px',pointerEvents:'none'}}/>
-                    <input type="range" min={1900} max={2026} step={1} value={yearMin} onChange={e=>setYearMin(Math.min(parseInt(e.target.value),yearMax-1))} style={{zIndex:yearMin>2015?3:2}}/>
-                    <input type="range" min={1900} max={2026} step={1} value={yearMax} onChange={e=>setYearMax(Math.max(parseInt(e.target.value),yearMin+1))} style={{zIndex:3}}/>
+                    <span style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMin}</span>
+                    <span style={{fontSize:'clamp(12px,1.4vw,20px)',fontWeight:400,color:'var(--t3)',margin:'0 clamp(6px,.5vw,10px)'}}>—</span>
+                    <span style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMax}</span>
                   </div>
                 </div>
-                {/* Labels positionnés en absolu pour aligner avec le vrai slider */}
-                <div style={{position:'relative',height:'clamp(14px,1.4vh,20px)',padding:'0 clamp(10px,1vw,16px)'}}>
-                  {[1900,1940,1960,1980,1990,2000,2005,2010,2015,2020,2026].map(y=>{
-                    const pct=(y-1900)/(2026-1900)*100;
-                    return(
-                      <span key={y} onClick={()=>{if(Math.abs(y-yearMin)<=Math.abs(y-yearMax))setYearMin(Math.min(y,yearMax-1));else setYearMax(Math.max(y,yearMin+1));}}
-                        style={{position:'absolute',left:`${pct}%`,transform:'translateX(-50%)',fontSize:'clamp(7px,.55vw,10px)',color:'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',whiteSpace:'nowrap',userSelect:'none'}}
-                        onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
-                        onMouseLeave={e=>e.currentTarget.style.color='var(--t4)'}>{y}</span>
-                    );
-                  })}
+                {/* Slider index-based — thumb et labels parfaitement alignés */}
+                <div style={{padding:'0 clamp(10px,1vw,14px)',marginBottom:'clamp(6px,.6vh,10px)'}}>
+                  <div className="rs">
+                    {/* Barre remplie basée sur les indices */}
+                    <div style={{position:'absolute',top:0,bottom:0,left:`${minIdx/YN*100}%`,width:`${(maxIdx-minIdx)/YN*100}%`,background:'rgba(255,255,255,.75)',borderRadius:'999px',pointerEvents:'none'}}/>
+                    <input type="range" min={0} max={YN} step={1} value={minIdx} onChange={e=>setMinIdx(Math.min(+e.target.value,maxIdx))} style={{zIndex:minIdx>YN-2?3:2}}/>
+                    <input type="range" min={0} max={YN} step={1} value={maxIdx} onChange={e=>setMaxIdx(Math.max(+e.target.value,minIdx))} style={{zIndex:3}}/>
+                  </div>
+                </div>
+                {/* Labels avec flex space-between = même espacement que les pas du slider */}
+                <div style={{display:'flex',justifyContent:'space-between',padding:'0 clamp(10px,1vw,14px)'}}>
+                  {YEAR_STEPS.map((y,i)=>(
+                    <span key={y} onClick={()=>{if(Math.abs(i-minIdx)<=Math.abs(i-maxIdx))setMinIdx(i);else setMaxIdx(i);}}
+                      style={{fontSize:'clamp(6px,.5vw,9px)',color:i===minIdx||i===maxIdx?'rgba(255,255,255,.85)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:i===minIdx||i===maxIdx?700:400}}
+                      onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
+                      onMouseLeave={e=>e.currentTarget.style.color=i===minIdx||i===maxIdx?'rgba(255,255,255,.85)':'var(--t4)'}>{y}</span>
+                  ))}
                 </div>
               </div>{/* fin maxWidth frise */}
             </div>{/* fin frise */}
@@ -803,7 +829,7 @@ export default function App(){
         </div>{/* fin row */}
 
         {/* ── Barre inférieure ─── */}
-        {(selArts.length>0||mixPerso)&&<div style={{flexShrink:0,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'rgba(0,0,0,.4)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.1),0 -2px 20px rgba(0,0,0,.4)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
+        {(selArts.length>0||mixPerso)&&<div style={{flexShrink:0,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'rgba(8,6,5,.98)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.12)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
           <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)',flex:1,overflowX:'auto',paddingBottom:2}}>
             {mixPerso&&<div style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(4px,.4vh,7px) clamp(10px,.9vw,16px)',borderRadius:'999px',background:mixMode==='1v1'?'rgba(168,85,247,.22)':'rgba(88,101,242,.22)',boxShadow:`inset 0 1px 0 rgba(255,255,255,.3),inset 0 0 0 1px ${mixMode==='1v1'?'rgba(168,85,247,.35)':'rgba(88,101,242,.35)'}`,flexShrink:0}}>
               <span style={{fontSize:'clamp(10px,.72vw,14px)'}}>Mix {mixMode==='1v1'?'1v1':'Solo'}</span>
@@ -827,13 +853,13 @@ export default function App(){
       {screen==='game'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(22px,3vw,60px)',padding:'clamp(14px,1.5vh,26px)'}}>
         <MysteryCover url={track?.album?.images?.[0]?.url} sz="clamp(180px,22vh,340px)"/>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.4vh,22px)'}}>
-          <div style={{background:'rgba(0,0,0,.35)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.25),inset 0 0 0 1px rgba(255,255,255,.1)',borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(18px,1.8vw,30px)',display:'flex',gap:'clamp(14px,1.4vw,22px)'}}>
+          <div style={{background:'rgba(0,0,0,.7)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 1px rgba(255,255,255,.18)',borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(18px,1.8vw,30px)',display:'flex',gap:'clamp(14px,1.4vw,22px)'}}>
             <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Manche <strong style={{color:'var(--t1)'}}>{cIdx+1}</strong>/{pool.length}</span>
             <span style={{color:'var(--t3)'}}>|</span>
             <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Score <strong style={{color:'var(--t1)'}}>{score}</strong></span>
           </div>
           <div style={{textAlign:'center'}}>
-            <div className={`t${tc}`} style={{fontSize:'clamp(50px,7.5vw,120px)',fontWeight:700,letterSpacing:'-.06em',lineHeight:1,fontVariantNumeric:'tabular-nums',transition:'color .5s'}}>{timer}</div>
+            <div className={`t${tc}`} style={{fontSize:'clamp(50px,7.5vw,120px)',fontWeight:700,letterSpacing:'-.06em',lineHeight:1,fontVariantNumeric:'tabular-nums',transition:'color .5s',filter:'drop-shadow(0 0 clamp(12px,1.5vw,24px) currentColor)'}}>{timer}</div>
             <div style={{height:'clamp(3px,.3vh,5px)',background:'rgba(255,255,255,.1)',borderRadius:'999px',marginTop:'clamp(8px,.8vh,14px)',width:'clamp(110px,13vw,220px)',overflow:'hidden'}}>
               <div style={{height:'100%',width:`${(timer/dur)*100}%`,background:tc==='g'?'#34d399':tc==='a'?'#fbbf24':'#f87171',borderRadius:'999px',transition:'width 1s linear,background .5s'}}/>
             </div>
@@ -858,19 +884,16 @@ export default function App(){
           </div>
           <div style={{textAlign:'center',animation:'fadeUp .4s ease .35s both',opacity:0}}>
             <h2 style={{fontSize:'clamp(17px,1.8vw,30px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(4px,.4vh,8px)'}}>{track?.name}</h2>
-            <p style={{fontSize:'clamp(12px,.88vw,16px)',color:'rgba(255,255,255,.65)',marginBottom:'clamp(3px,.3vh,6px)'}}><span style={{color:'var(--t1)',textDecoration:'underline',textDecorationColor:'rgba(255,255,255,.22)',cursor:'pointer'}}>{track?.artists?.map(a=>a.name).join(', ')}</span></p>
+            <p style={{fontSize:'clamp(12px,.88vw,16px)',color:'rgba(255,255,255,.65)',marginBottom:'clamp(3px,.3vh,6px)'}}>
+              <a href={`https://open.spotify.com/artist/${track?.artists?.[0]?.id}`} target="_blank" rel="noopener noreferrer" style={{color:'var(--t1)',textDecoration:'underline',textDecorationColor:'rgba(255,255,255,.3)',cursor:'pointer'}}>{track?.artists?.map(a=>a.name).join(', ')}</a>
+            </p>
             <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)'}}>{track?.album?.name} · {track?.album?.release_date?.slice(0,4)}</p>
+            {track?.popularity>0&&<p style={{fontSize:'clamp(10px,.72vw,14px)',color:'rgba(255,255,255,.45)',marginTop:'clamp(2px,.2vh,4px)'}}>Popularité Spotify : {track.popularity}/100</p>}
           </div>
           <div className="g2" style={{borderRadius:'clamp(9px,.8vw,15px)',padding:'clamp(9px,.9vh,15px) clamp(16px,1.6vw,26px)',animation:'fadeUp .4s ease .5s both',opacity:0}}>
-            <p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center'}}>Trouvé en <strong>{Math.max(0,dur-timer)}s</strong> — +{Math.max(10,Math.round((timer/dur)*1000))} pts</p>
+            <p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center'}}>Trouvé en <strong>{Math.max(0,dur-timer)}s</strong> — +{Math.max(1,Math.round((timer/dur)*5))} pts</p>
           </div>
-          <div style={{display:'flex',gap:'clamp(8px,.7vw,14px)',animation:'fadeUp .4s ease .62s both',opacity:0}}>
-            {[['👍','rgba(52,211,153,.16)'],['👎','rgba(248,113,113,.16)']].map(([e,h],i)=>(
-              <button key={i} className="g2" style={{border:'none',borderRadius:'999px',padding:'clamp(8px,.8vh,14px) clamp(18px,1.8vw,28px)',cursor:'pointer',fontSize:'clamp(15px,1.6vh,24px)',transition:'all .15s'}}
-                onMouseEnter={e2=>e2.currentTarget.style.background=h}
-                onMouseLeave={e2=>e2.currentTarget.style.background='var(--mR)'}>{e}</button>
-            ))}
-          </div>
+
           <button onClick={nextRound} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(28px,2.8vw,48px)',borderRadius:'999px',fontSize:'clamp(12px,.88vw,16px)',animation:'fadeUp .4s ease .74s both',opacity:0}}>
             {cIdx+1>=pool.length?'Voir les scores':'Suivant'}
           </button>
