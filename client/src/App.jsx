@@ -668,14 +668,26 @@ export default function App(){
       for(let i=0;i<jobs.length;i+=BATCH){
         const batch=jobs.slice(i,i+BATCH);
         const results=await Promise.allSettled(batch.map(({q,off})=>api.search(q,'track',6,off)));
+        let has429=false;
         for(const res of results){
-          if(res.status!=='fulfilled')continue;
+          if(res.status==='rejected'){
+            if(res.reason?.message?.includes('429')||res.reason?.message?.includes('Rate')){
+              has429=true;
+            }
+            continue;
+          }
           for(const t of(res.value.tracks?.items||[]).filter(fn)){
             if(!seenIds.has(t.id)){seenIds.add(t.id);all.push(t);}
           }
         }
         onProgress&&onProgress(`${a.name} — ${all.length} sons…`,all.length);
-        await new Promise(r=>setTimeout(r,80));
+        // Si rate limit détecté → pause 5s avant de continuer
+        if(has429){
+          console.warn('[MT] 429 détecté → pause 5s');
+          await new Promise(r=>setTimeout(r,5000));
+        }else{
+          await new Promise(r=>setTimeout(r,250));
+        }
       }
     }
     return all;
