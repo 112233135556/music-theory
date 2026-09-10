@@ -567,26 +567,32 @@ export default function App(){
     clearTimeout(artRef.current);
     if(artQ.length<2){setArtRes([]);return;}
     artRef.current=setTimeout(async()=>{
+      // spDirect = appel direct Spotify (bypass Railway → quota séparé du pool building)
+      // Fallback sur api.search (Railway) si direct échoue
+      const trySearch=async(q)=>{
+        try{
+          const r=await spDirect(`/search?q=${encodeURIComponent(q)}&type=artist&limit=6`);
+          return r.artists?.items||[];
+        }catch(e){
+          // Fallback Railway si spDirect échoue
+          try{
+            const r2=await api.search(q,'artist',6);
+            return r2.artists?.items||[];
+          }catch(e2){return[];}
+        }
+      };
       try{
-        // Double requête : exact en premier (guillemets) + fuzzy → plus de chances de trouver
-        // ex: "Niro" exact + Niro fuzzy → le bon Niro apparaît même s'il est moins connu globalement
-        const [r1,r2]=await Promise.allSettled([
-          api.search(`"${artQ}"`, 'artist', 6),  // exact match
-          api.search(artQ, 'artist', 6),          // fuzzy
+        const [items1,items2]=await Promise.all([
+          trySearch(`"${artQ}"`),  // exact
+          trySearch(artQ),          // fuzzy
         ]);
-        const items1=r1.status==='fulfilled'?r1.value.artists?.items||[]:[];
-        const items2=r2.status==='fulfilled'?r2.value.artists?.items||[]:[];
-        // Combiner sans doublons (exact en priorité)
         const seen=new Set();
         const combined=[...items1,...items2].filter(a=>{
           if(seen.has(a.id))return false;seen.add(a.id);return true;
         });
-        // ⚠️ Ne PAS filtrer les top 50 — si l'artiste est dans le top il doit quand même
-        // être trouvable via la barre de recherche
         setArtRes(combined);
         console.log('[MT] artist search:',combined.length,'résultats pour',artQ);
       }catch(e){
-        console.warn('[MT] artist search error:',e.message);
         setArtRes([]);
       }
     },350);
@@ -663,8 +669,8 @@ export default function App(){
         for(const off of[0,6,12])jobs.push({q:`artist:"${a.name}" year:${y}`,off});
       }
       for(const off of[0,6,12,18,24,30])jobs.push({q:`artist:"${a.name}"`,off});
-      // Exécuter par batch de 4 en parallèle (rate-limit doux)
-      const BATCH=4;
+      // Batch de 2 avec délai généreux pour préserver le quota Railway
+      const BATCH=2;
       for(let i=0;i<jobs.length;i+=BATCH){
         const batch=jobs.slice(i,i+BATCH);
         const results=await Promise.allSettled(batch.map(({q,off})=>api.search(q,'track',6,off)));
@@ -686,7 +692,7 @@ export default function App(){
           console.warn('[MT] 429 détecté → pause 5s');
           await new Promise(r=>setTimeout(r,5000));
         }else{
-          await new Promise(r=>setTimeout(r,250));
+          await new Promise(r=>setTimeout(r,350)); // préserve quota Railway
         }
       }
     }
