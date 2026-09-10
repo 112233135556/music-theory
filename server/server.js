@@ -243,6 +243,11 @@ function handleWS(ws, msg) {
       const r = rooms.get(ws.roomCode); if (!r) return;
       send(ws.role==='host'?r.guest:r.host, { type:'artist_update', artists:msg.artists, mix:msg.mix }); break;
     }
+    case 'share_artists': {
+      // Guest envoie ses top artistes → forwarded au host sous 'guest_artists'
+      const r = rooms.get(ws.roomCode); if (!r || ws.role !== 'guest') return;
+      send(r.host, { type:'guest_artists', artists:msg.artists||[] }); break;
+    }
     case 'game_start': {
       const r = rooms.get(ws.roomCode); if (!r||ws.role!=='host') return;
       send(r.guest, { type:'game_start', tracks:msg.tracks }); break;
