@@ -137,7 +137,7 @@ app.get('/api/search-artists', async (req,res) => {
 app.get('/api/artists/:id/tracks', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
   try {
-    const { data } = await spGet(`https://api.spotify.com/v1/artists/${req.params.id}/top-tracks`, t);
+    const { data } = await spGet(`https://api.spotify.com/v1/artists/${req.params.id}/top-tracks?market=US`, t);
     res.json(data);
   } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
