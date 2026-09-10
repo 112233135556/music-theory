@@ -5,9 +5,10 @@ import { api } from './api';
 const MIX_SOLO_URL = new URL('./mix-solo.png', import.meta.url).href;
 const MIX_1V1_URL  = new URL('./mix-1v1.png',  import.meta.url).href;
 
-// Frise chronologique — constantes module (stable entre renders)
-const YEAR_STEPS=[1900,1910,1920,1930,1940,1950,1960,1970,1980,1990,1995,2000,2005,2010,2015,2020,2023,2026];
-const YN=YEAR_STEPS.length-1; // 17
+// Frise — chaque année sélectionnable, labels affichés seulement en 0/5
+const YEAR_STEPS=Array.from({length:127},(_,i)=>1900+i); // 1900→2026
+const YN=126;
+const YEAR_LABELS=YEAR_STEPS.filter(y=>y%5===0||y===2026); // 1900,1905,...,2025,2026
 
 // ─── spDirect : appelle Spotify directement (bypasse le serveur pour les artistes)
 // Le token refresh passe par le serveur (besoin du client_secret).
@@ -297,7 +298,8 @@ export default function App(){
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
   const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
-  const[minIdx,setMinIdx]=useState(12); // 2005 (index dans YEAR_STEPS)
+  const[minIdx,setMinIdx]=useState(105); // 2005
+  // maxIdx déjà défini plus bas via useState(YN)
   const[maxIdx,setMaxIdx]=useState(YN); // 2026
   const yearMin=YEAR_STEPS[minIdx];
   const yearMax=YEAR_STEPS[maxIdx];
@@ -445,29 +447,29 @@ export default function App(){
     }else{
         for(const a of selArts){
         const artTracks=[];
-        // Source 1 : top-tracks (10 sons)
-        try{ const d=await api.artistTracks(a.id); artTracks.push(...(d.tracks||[])); }catch(e){}
-        // Source 2 : search offset 0 (20 sons)
-        try{
-          const r=await api.search(a.name,'track',20);
-          artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
-        }catch(e){}
-        // Source 3 : search offset 20 via spDirect (20 sons supplémentaires)
-        try{
-          const r=await spDirect(`/search?q=${encodeURIComponent(a.name)}&type=track&limit=20&offset=20`);
-          artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
-        }catch(e){}
-        // Source 4 : search offset 40 (encore plus)
-        try{
-          const r=await spDirect(`/search?q=${encodeURIComponent(a.name)}&type=track&limit=20&offset=40`);
-          artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
-        }catch(e){}
-        // Si filtre artiste trop strict (artiste peu connu), prendre tous les résultats
-        if(artTracks.length<5){
+        const filterFn=t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase());
+        // Requêtes variées via serveur (limit=6, endpoint confirmé fonctionnel)
+        const queries=[
+          a.name,
+          `"${a.name}"`,
+          `${a.name} music`,
+          `${a.name} rap`,
+          `${a.name} feat`,
+          `${a.name} new`,
+        ];
+        for(const q of queries){
           try{
-            const r=await api.search(a.name,'track',20);
-            artTracks.push(...(r.tracks?.items||[]));
+            const r=await api.search(q,'track',6);
+            const items=r.tracks?.items||[];
+            artTracks.push(...items.filter(filterFn));
           }catch(e){}
+          await new Promise(r=>setTimeout(r,80)); // éviter rate limit
+        }
+        // Top-tracks via serveur
+        try{const d=await api.artistTracks(a.id);artTracks.push(...(d.tracks||[]));}catch(e){}
+        // Si toujours vide, prendre sans filtre artiste strict
+        if(artTracks.length<3){
+          try{const r=await api.search(a.name,'track',6);artTracks.push(...(r.tracks?.items||[]));}catch(e){}
         }
         tracks.push(...artTracks);
       }
@@ -661,7 +663,7 @@ export default function App(){
             clearInterval(timerRef.current);
             clearInterval(progRef.current);
             playerRef.current?.pause().catch(()=>{});
-            setMinIdx(12);setMaxIdx(YN); // reset frise
+            setMinIdx(105);setMaxIdx(YN); // reset frise
             setScreen('home');
           }:null}
           dark={screen==='game'||screen==='reveal'}/>
@@ -741,8 +743,8 @@ export default function App(){
 
           {/* ── COLONNE GAUCHE : Mix personnalisés ─────────── */}
           {/* Colonne gauche — overflow:hidden pour clipper les covers à la limite de la zone */}
-          <div style={{width:'clamp(190px,18vw,280px)',flexShrink:0,overflow:'hidden',padding:'clamp(14px,1.6vh,24px) clamp(12px,1.2vw,18px)',display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(10px,1.1vh,16px)'}}>
-            <div style={{width:'100%',marginBottom:'clamp(6px,.6vh,10px)'}}>
+          <div style={{width:'clamp(190px,18vw,280px)',flexShrink:0,overflow:'hidden',padding:'clamp(14px,1.6vh,24px) clamp(12px,1.2vw,18px)',display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(10px,1.1vh,16px)',justifyContent:'flex-start'}}>
+            <div style={{width:'100%',marginBottom:'clamp(6px,.6vh,10px)',textAlign:'left'}}>
               <h2 style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.92,marginBottom:'clamp(5px,.5vh,8px)'}}>Mix</h2>
               <p style={{fontSize:'clamp(9px,.67vw,12px)',color:'var(--t3)'}}>Basé sur tes écoutes Spotify</p>
             </div>
@@ -791,7 +793,7 @@ export default function App(){
             </div>{/* fin zone scrollable */}
 
             {/* ── Frise chronologique — hors du scroll, toujours visible en bas ─── */}
-            <div style={{flexShrink:0,padding:'clamp(12px,1.4vh,20px) clamp(24px,2.4vw,42px)',borderTop:'1px solid rgba(255,255,255,.07)',background:'rgba(10,8,6,.97)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)'}}>
+            <div style={{flexShrink:0,padding:'clamp(12px,1.4vh,20px) clamp(24px,2.4vw,42px)',background:'transparent',paddingTop:'clamp(10px,1.2vh,18px)'}}>
               <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
                 <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'clamp(10px,1.1vh,16px)',gap:'clamp(12px,1.2vw,20px)'}}>
                   <div>
@@ -813,14 +815,20 @@ export default function App(){
                     <input type="range" min={0} max={YN} step={1} value={maxIdx} onChange={e=>setMaxIdx(Math.max(+e.target.value,minIdx))} style={{zIndex:3}}/>
                   </div>
                 </div>
-                {/* Labels avec flex space-between = même espacement que les pas du slider */}
-                <div style={{display:'flex',justifyContent:'space-between',padding:'0 clamp(10px,1vw,14px)'}}>
-                  {YEAR_STEPS.map((y,i)=>(
-                    <span key={y} onClick={()=>{if(Math.abs(i-minIdx)<=Math.abs(i-maxIdx))setMinIdx(i);else setMaxIdx(i);}}
-                      style={{fontSize:'clamp(6px,.5vw,9px)',color:i===minIdx||i===maxIdx?'rgba(255,255,255,.85)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:i===minIdx||i===maxIdx?700:400}}
-                      onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
-                      onMouseLeave={e=>e.currentTarget.style.color=i===minIdx||i===maxIdx?'rgba(255,255,255,.85)':'var(--t4)'}>{y}</span>
-                  ))}
+                {/* Labels : seuls les 0/5 affichés, positionnés précisément */}
+                <div style={{position:'relative',height:'clamp(14px,1.4vh,18px)',padding:'0 clamp(10px,1vw,14px)'}}>
+                  {YEAR_LABELS.map(y=>{
+                    const i=y-1900;
+                    const pct=i/YN*100;
+                    const active=i===minIdx||i===maxIdx;
+                    return(
+                      <span key={y}
+                        onClick={()=>{if(Math.abs(i-minIdx)<=Math.abs(i-maxIdx))setMinIdx(i);else setMaxIdx(i);}}
+                        style={{position:'absolute',left:`${pct}%`,transform:'translateX(-50%)',fontSize:'clamp(7px,.55vw,10px)',color:active?'rgba(255,255,255,.9)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:active?700:400,whiteSpace:'nowrap'}}
+                        onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
+                        onMouseLeave={e=>e.currentTarget.style.color=active?'rgba(255,255,255,.9)':'var(--t4)'}>{y}</span>
+                    );
+                  })}
                 </div>
               </div>{/* fin maxWidth frise */}
             </div>{/* fin frise */}
@@ -829,7 +837,8 @@ export default function App(){
         </div>{/* fin row */}
 
         {/* ── Barre inférieure ─── */}
-        {(selArts.length>0||mixPerso)&&<div style={{flexShrink:0,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'rgba(8,6,5,.98)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.12)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
+        {/* Barre toujours visible — Lancer grisé tant qu'aucun artiste/mix */}
+        <div style={{flexShrink:0,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'rgba(8,6,5,.98)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.12)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
           <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)',flex:1,overflowX:'auto',paddingBottom:2}}>
             {mixPerso&&<div style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(4px,.4vh,7px) clamp(10px,.9vw,16px)',borderRadius:'999px',background:mixMode==='1v1'?'rgba(168,85,247,.22)':'rgba(88,101,242,.22)',boxShadow:`inset 0 1px 0 rgba(255,255,255,.3),inset 0 0 0 1px ${mixMode==='1v1'?'rgba(168,85,247,.35)':'rgba(88,101,242,.35)'}`,flexShrink:0}}>
               <span style={{fontSize:'clamp(10px,.72vw,14px)'}}>Mix {mixMode==='1v1'?'1v1':'Solo'}</span>
@@ -843,10 +852,11 @@ export default function App(){
               </div>
             ))}
           </div>
-          <button onClick={startGame} disabled={loading} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(24px,2.4vw,42px)',borderRadius:'999px',fontSize:'clamp(13px,.9vw,17px)',fontWeight:600,flexShrink:0,opacity:loading?.6:1,boxShadow:'0 4px 20px rgba(255,255,255,.2)'}}>
+          <button onClick={startGame} disabled={loading||(!mixPerso&&selArts.length===0)} className="bs"
+            style={{padding:'clamp(10px,1vh,16px) clamp(24px,2.4vw,42px)',borderRadius:'999px',fontSize:'clamp(13px,.9vw,17px)',fontWeight:600,flexShrink:0,opacity:loading||(!mixPerso&&selArts.length===0)?.38:1,boxShadow:'0 4px 20px rgba(255,255,255,.2)',transition:'opacity .2s'}}>
             {loading?'Chargement…':'Lancer'}
           </button>
-        </div>}
+        </div>
       </div>}
 
             {/* ── GAME */}
