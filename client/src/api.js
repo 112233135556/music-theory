@@ -79,8 +79,8 @@ export const api = {
 
   // Search via serveur — FONCTIONNE pour les sons (autocomplete en jeu),
   // donc aussi pour les artistes. limit=6 identique à ce qui marche.
-  search: (q, type = 'track', limit = 6) =>
-    apiFetch(`/api/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`),
+  search: (q, type = 'track', limit = 6, offset = 0) =>
+    apiFetch(`/api/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}&offset=${offset}`),
 
   // Tracks d'un artiste via serveur (endpoint /api/artists/:id/tracks)
   artistTracks: (id) => apiFetch(`/api/artists/${id}/tracks`),
