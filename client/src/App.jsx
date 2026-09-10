@@ -457,12 +457,6 @@ export default function App(){
     return queries;
   };
 
-  // ─── Filtre strict : artiste PRINCIPAL seulement + non-playable exclus ──
-  const isMainArtist=(track,artistId,artistNameLow)=>{
-    if(track.is_playable===false)return false; // pas dispo dans la région
-    const first=track.artists?.[0];
-    return first?.id===artistId||first?.name?.toLowerCase()===artistNameLow;
-  };
 
   // ─── isMainArtist : artiste principal uniquement + exclure non-playable ─────
   const isMainArtist=(track,artistId,nameLow)=>{
@@ -541,7 +535,7 @@ export default function App(){
     });
     const pool=inRange.length>0?inRange:base;
     if(!pool.length){
-      setErr('Aucun son trouvé — essaie une autre période ou sélectionne d'autres artistes.');
+      setErr(`Aucun son trouvé — essaie une autre période ou sélectionne d'autres artistes.`);
       setLoading(false);setLoadingMsg('');return;
     }
     // Shuffle aléatoire complet sur tout le catalogue trouvé
