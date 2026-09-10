@@ -999,15 +999,16 @@ export default function App(){
               const active=mixPerso&&mixMode===mode;
               const bgImg=topArtists[mode==='solo'?mixCoverIdx.solo:mixCoverIdx.v1]?.images?.[0]?.url;
                   return(
-                <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'min(100%,clamp(160px,16vw,250px))',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
-                  {/* Template CSS (reproduit le design sans fichier externe) */}
-                  <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
-                  {/* Indicateur sélectionné */}
-                  {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓ Sélectionné</div>}
-                  {/* Label mode en bas */}
-                  <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'clamp(8px,.8vh,12px)',background:'linear-gradient(to top,rgba(0,0,0,.7),transparent)',pointerEvents:'none'}}>
-                    <div style={{fontSize:'clamp(11px,.9vw,16px)',fontWeight:700,color:'white'}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
-                    <div style={{fontSize:'clamp(8px,.62vw,12px)',color:'rgba(255,255,255,.6)'}}>{mode==='solo'?"Un mix basé sur tes écoutes Spotify":"Vos goûts musicaux fusionnés en un mix"}</div>
+                <div key={mode} style={{cursor:'pointer',width:'min(100%,clamp(160px,16vw,250px))',flexShrink:0}} onClick={()=>{setMixPerso(true);setMixMode(mode);}}>
+                  {/* Cover 100% visible — aucun texte par dessus */}
+                  <div style={{position:'relative',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s'}}>
+                    <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
+                    {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓</div>}
+                  </div>
+                  {/* Texte SOUS la cover */}
+                  <div style={{padding:'clamp(7px,.7vh,11px) clamp(4px,.35vw,6px) 0'}}>
+                    <div style={{fontSize:'clamp(12px,.95vw,17px)',fontWeight:700,color:'var(--t1)',marginBottom:'clamp(2px,.2vh,4px)'}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
+                    <div style={{fontSize:'clamp(9px,.65vw,13px)',color:'var(--t3)',lineHeight:1.35}}>{mode==='solo'?'Un mix basé sur tes écoutes Spotify':'Vos goûts musicaux fusionnés en un mix'}</div>
                   </div>
                 </div>
               );
