@@ -217,12 +217,12 @@ function PlayerBar({track,paused,prog,onPause,onSeek,vol,onVolume,revealed,canSe
   return(
     <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:100,height:'var(--PB)',display:'flex',alignItems:'center',gap:'clamp(10px,.9vw,18px)',padding:'0 clamp(14px,1.4vw,28px)',background:'rgba(0,0,0,.42)',backdropFilter:'blur(28px) saturate(1.8)',WebkitBackdropFilter:'blur(28px) saturate(1.8)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 0 1px rgba(255,255,255,.08),0 -2px 24px rgba(0,0,0,.5)'}}>
       <div style={{width:'clamp(34px,3vh,46px)',height:'clamp(34px,3vh,46px)',borderRadius:'clamp(5px,.45vw,9px)',flexShrink:0,position:'relative',overflow:'hidden',boxShadow:'var(--le)'}}>
-        {track.album?.images?.[0]?.url&&<img src={track.album.images[0].url} style={{width:'100%',height:'100%',objectFit:'cover',filter:revealed?'none':'grayscale(100%) brightness(.28)',transition:'filter 1.2s ease'}} alt=""/>}
-        {!revealed&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(12px,1.1vh,18px)',fontWeight:700,color:'rgba(255,255,255,.7)'}}>?</div>}
+        {track.album?.images?.[0]?.url&&<img src={track.album.images[0].url} style={{width:'100%',height:'100%',objectFit:'cover',filter:revealed?'none':'grayscale(100%) brightness(.05) blur(4px)',transition:'filter 1.2s ease',opacity:revealed?1:.4}} alt=""/>}
+        {!revealed&&<div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.65)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(12px,1.1vh,18px)',fontWeight:700,color:'rgba(255,255,255,.5)'}}>?</div>}
       </div>
       <div style={{width:'clamp(90px,9vw,160px)',flexShrink:0}}>
-        <div style={{fontSize:'clamp(10px,.72vw,13px)',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{revealed?track.name:'—'}</div>
-        <div style={{fontSize:'clamp(9px,.65vw,12px)',color:'var(--t3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{revealed?track.artists?.map(a=>a.name).join(', '):'—'}</div>
+        <div style={{fontSize:'clamp(10px,.72vw,13px)',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{revealed?track.name:''}</div>
+        <div style={{fontSize:'clamp(9px,.65vw,12px)',color:'var(--t3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{revealed?track.artists?.map(a=>a.name).join(', '):''}</div>
       </div>
       <div style={{display:'flex',alignItems:'center',gap:'clamp(7px,.6vw,12px)',flexShrink:0}}>
         {canSeek&&<button className="bg" style={{fontSize:'clamp(13px,1.1vh,18px)',display:'flex'}}>{IC.pv}</button>}
@@ -449,30 +449,13 @@ export default function App(){
         const artTracks=[];
         console.log(`[MT] Catalogue ${a.name}...`);
         try{
-          // ── Direct Spotify (CORS OK pour ces endpoints, bypass serveur)
-          // Étape 1 : tous les albums + singles
-          const albumsData=await spDirect(`/artists/${encodeURIComponent(a.id)}/albums?include_groups=album,single&limit=50`);
-          const allAlbumIds=(albumsData.items||[]).map(al=>al.id);
-          console.log(`[MT] ${a.name}: ${allAlbumIds.length} releases`);
-          // Étape 2 : batch 20 albums → tracks complètes avec covers
-          const BATCH=20;
-          for(let i=0;i<allAlbumIds.length;i+=BATCH){
-            const ids=allAlbumIds.slice(i,i+BATCH).join(',');
-            try{
-              const bd=await spDirect(`/albums?ids=${ids}`);
-              for(const album of bd.albums||[]){
-                if(!album)continue;
-                const ai={id:album.id,name:album.name,images:album.images,release_date:album.release_date};
-                for(const t of album.tracks?.items||[]){
-                  artTracks.push({id:t.id,name:t.name,duration_ms:t.duration_ms,artists:t.artists,preview_url:t.preview_url,album:ai,popularity:0});
-                }
-              }
-            }catch(e){console.warn(`[MT] Batch ${Math.ceil(i/BATCH)+1} fail`,e.message);}
-          }
-          console.log(`[MT] ${a.name}: ${artTracks.length} sons`);
+          // Endpoint server-side qui fait tout (albums+tracks, pagine avec limit=20)
+          const result=await api.artistAllTracks(a.id);
+          artTracks.push(...(result.tracks||[]));
+          console.log(`[MT] ${a.name}: ${artTracks.length} sons via server`);
         }catch(e){
-          console.warn(`[MT] spDirect albums failed ${a.name}:`,e.message,'; fallback search');
-          // Fallback via serveur (search confirmé fonctionnel)
+          console.warn(`[MT] all-tracks failed ${a.name}:`,e.message,'; fallback search');
+          // Fallback : search varié via serveur
           const qs=[a.name,`"${a.name}"`,`${a.name} music`,`${a.name} feat`];
           for(const q of qs){
             try{
