@@ -142,6 +142,28 @@ app.get('/api/artists/:id/tracks', async (req,res) => {
   } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
+// Albums d'un artiste (pour obtenir le catalogue complet)
+app.get('/api/artists/:id/albums', async (req,res) => {
+  const t = req.headers.authorization?.split(' ')[1];
+  try {
+    const { data } = await spGet(
+      `https://api.spotify.com/v1/artists/${req.params.id}/albums?include_groups=album,single&limit=50&market=US`, t
+    );
+    res.json(data);
+  } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
+});
+
+// Batch albums avec leurs tracks (max 20 ids)
+app.get('/api/albums', async (req,res) => {
+  const t = req.headers.authorization?.split(' ')[1];
+  const { ids } = req.query;
+  if(!ids) return res.status(400).json({error:'ids required'});
+  try {
+    const { data } = await spGet(`https://api.spotify.com/v1/albums?ids=${ids}&market=US`, t);
+    res.json(data);
+  } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
+});
+
 app.get('/health', (_, res) => res.json({ ok:true }));
 
 // ── WebSocket 1v1 ─────────────────────────────────────────
