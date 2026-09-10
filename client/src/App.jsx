@@ -423,10 +423,12 @@ export default function App(){
       case 'host_control':
         if(msg.action==='next')nextRoundRef.current?.();
         if(msg.action==='pause')handlePauseRef.current?.();
+        if(msg.action==='reveal')doRevealRef.current?.(); // host timer expired
         break;
       case 'room_joined':
         setRoomCode((msg.code||'').toUpperCase());
         setRoomRole('guest');
+        setOpponentInfo({name:msg.hostName||'Host'}); // l'adversaire du guest c'est le host
         setScreen('waiting');
         break;
       case 'opponent_left':
@@ -469,7 +471,16 @@ export default function App(){
     clearInterval(timerRef.current);
     if(screen!=='game'||revealed||paused)return;
     timerRef.current=setInterval(()=>{
-      setTimer(t=>{if(t<=1){clearInterval(timerRef.current);doReveal();return 0;}return t-1;});
+      setTimer(t=>{
+        if(t<=1){
+          clearInterval(timerRef.current);
+          // En 1v1 host : broadcaster le reveal (le guest a son propre timer mais peut désynchroniser)
+          if(roomRole==='host') sendWS({type:'host_control',action:'reveal'});
+          doReveal();
+          return 0;
+        }
+        return t-1;
+      });
     },1000);
     return()=>clearInterval(timerRef.current);
   },[screen,revealed,paused]);
@@ -666,7 +677,7 @@ export default function App(){
       setRoomRole('host');
       setRoomCode(''); // va être rempli par room_created
       // Créer la room — réponse arrive via messageHandlerRef (room_created → setRoomCode)
-      wsRef.current.send(JSON.stringify({type:'create_room',settings:{rounds:actualRounds,dur}}));
+      wsRef.current.send(JSON.stringify({type:'create_room',settings:{rounds:actualRounds,dur},hostName:user?.display_name||'Host'}));
       setLoadingMsg(`✓ ${pool.length} sons — Création de la room…`);
       // Attendre que room_created arrive (max 4s)
       let waited=0;
@@ -899,7 +910,8 @@ export default function App(){
                 <span style={{color:'var(--t3)',fontSize:'clamp(17px,1.6vw,25px)',display:'flex'}}>{joinOpen?IC.xm:IC.chR}</span>
               </div>
               {joinOpen&&<div style={{marginTop:'clamp(10px,1vh,16px)',display:'flex',gap:'clamp(8px,.7vw,12px)'}} onClick={e=>e.stopPropagation()}>
-                <input value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase())} placeholder="Code de la partie (ex: MT·7K4X)" style={{flex:1,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.14)',borderRadius:'clamp(8px,.7vw,12px)',padding:'clamp(9px,.9vh,14px) clamp(12px,1vw,18px)',color:'var(--t1)',fontSize:'clamp(12px,.85vw,15px)',outline:'none',fontFamily:'var(--F)',letterSpacing:'.06em',fontWeight:600}} onKeyDown={e=>e.key==='Enter'&&alert('1v1 en cours de développement — bientôt disponible')}/>
+                {err&&joinOpen&&<div style={{fontSize:'clamp(10px,.72vw,13px)',color:'rgba(248,113,113,.85)',marginBottom:'clamp(4px,.4vh,7px)'}}>{err}</div>}
+                <input value={joinCode} onChange={e=>{setJoinCode(e.target.value.toUpperCase());setErr('');}} placeholder="Code de la partie (ex: MT·7K4X)" style={{flex:1,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.14)',borderRadius:'clamp(8px,.7vw,12px)',padding:'clamp(9px,.9vh,14px) clamp(12px,1vw,18px)',color:'var(--t1)',fontSize:'clamp(12px,.85vw,15px)',outline:'none',fontFamily:'var(--F)',letterSpacing:'.06em',fontWeight:600}} onKeyDown={e=>e.key==='Enter'&&alert('1v1 en cours de développement — bientôt disponible')}/>
                 <button onClick={()=>{
                   if(!joinCode.trim()){setErr('Entre un code de partie');return;}
                   setRoomRole('guest');
@@ -1085,7 +1097,15 @@ export default function App(){
                 <span style={{fontSize:'clamp(12px,.88vw,16px)',color:'var(--t2)'}}>En attente d'un joueur…</span>
               </div>
               <div style={{display:'flex',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',flexWrap:'wrap'}}>
-                {roomCode&&<button onClick={()=>navigator.clipboard?.writeText(roomCode)} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Copier le code</button>}
+                {roomCode&&<button onClick={async()=>{
+                    try{
+                      if(navigator.clipboard){await navigator.clipboard.writeText(roomCode);}
+                      else{const el=document.createElement('input');el.value=roomCode;document.body.appendChild(el);el.select();document.execCommand('copy');document.body.removeChild(el);}
+                      // Flash visuel — changer le texte bouton
+                      const btn=document.activeElement;
+                      if(btn){const orig=btn.textContent;btn.textContent='Copié ✓';setTimeout(()=>{btn.textContent=orig;},1500);}
+                    }catch(e){}
+                  }} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Copier le code</button>}
                 <button onClick={()=>{setScreen('home');setRoomRole(null);setRoomCode('');roomCodeRef.current='';}} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Annuler</button>
               </div>
             </>
