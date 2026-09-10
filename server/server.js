@@ -164,6 +164,43 @@ app.get('/api/albums', async (req,res) => {
   } catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
+// Catalogue complet d'un artiste — tout server-side, limite le client à 1 appel
+// Le serveur pagine Spotify avec limit=20 (safe) et batch les albums
+app.get('/api/artists/:id/all-tracks', async (req,res) => {
+  const t = req.headers.authorization?.split(' ')[1];
+  try {
+    const allTracks = [];
+    // ── 1. Pages d'albums (max 4 pages = 80 releases)
+    let albumUrl = `https://api.spotify.com/v1/artists/${req.params.id}/albums?include_groups=album,single&limit=20`;
+    let pages = 0;
+    while(albumUrl && pages < 4){
+      const { data: aData } = await spGet(albumUrl, t);
+      const albumIds = (aData.items||[]).map(a => a.id);
+      albumUrl = aData.next || null;
+      pages++;
+      // ── 2. Batch 20 albums → tracks avec cover
+      for(let i=0; i<albumIds.length; i+=20){
+        const ids = albumIds.slice(i,i+20).join(',');
+        try{
+          const { data: bd } = await spGet(`https://api.spotify.com/v1/albums?ids=${ids}`, t);
+          for(const album of bd.albums||[]){
+            if(!album) continue;
+            const ai={id:album.id,name:album.name,images:album.images,release_date:album.release_date};
+            for(const tr of album.tracks?.items||[]){
+              allTracks.push({id:tr.id,name:tr.name,duration_ms:tr.duration_ms,artists:tr.artists,preview_url:tr.preview_url,album:ai,popularity:0});
+            }
+          }
+        }catch(e2){ console.error('batch albums err',e2.message); }
+      }
+    }
+    console.log(`[server] all-tracks ${req.params.id}: ${allTracks.length} tracks`);
+    res.json({ tracks: allTracks });
+  } catch(e) {
+    console.error('[server] all-tracks error:', e.response?.data||e.message);
+    res.status(e.response?.status||500).json(e.response?.data||{error:e.message});
+  }
+});
+
 app.get('/health', (_, res) => res.json({ ok:true }));
 
 // ── WebSocket 1v1 ─────────────────────────────────────────
