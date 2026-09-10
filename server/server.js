@@ -116,14 +116,56 @@ app.get('/api/recent', async (req,res) => {
   catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
+// ─── Cache in-memory pour /api/search ──────────────────────────────────────
+// Réduit drastiquement la consommation du quota Spotify (rate limit 429)
+const _searchCache = new Map();
+const CACHE_TTL = 90000; // 90 secondes par entrée
+
+function cacheGet(key) {
+  const hit = _searchCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > CACHE_TTL) { _searchCache.delete(key); return null; }
+  return hit.data;
+}
+function cacheSet(key, data) {
+  // Nettoyer les vieilles entrées si trop nombreuses
+  if (_searchCache.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of _searchCache) {
+      if (now - v.ts > CACHE_TTL) _searchCache.delete(k);
+    }
+  }
+  _searchCache.set(key, { data, ts: Date.now() });
+}
+
 app.get('/api/search', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
   const { q, type='track', limit=6, offset=0 } = req.query;
+  const cacheKey = `${q}|${type}|${limit}|${offset}`;
+  
+  // Retourner le cache si disponible — zéro appel Spotify
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    console.log(`[cache] HIT: ${cacheKey}`);
+    return res.json(cached);
+  }
+  
   try {
     const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=${type}&limit=${parseInt(limit)}&offset=${parseInt(offset)}&market=FR`;
-    res.json((await spGet(url, t)).data);
+    const { data } = await spGet(url, t);
+    cacheSet(cacheKey, data);
+    console.log(`[cache] SET: ${cacheKey}`);
+    res.json(data);
   }
-  catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
+  catch(e) {
+    // Si 429 : retourner cache périmé si disponible (plutôt que rien)
+    const stale = _searchCache.get(cacheKey);
+    if (stale) {
+      console.log(`[cache] STALE (429 fallback): ${cacheKey}`);
+      return res.json(stale.data);
+    }
+    res.status(e.response?.status||500).json(e.response?.data);
+  }
 });
 
 // Search artists in full Spotify catalog
