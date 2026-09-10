@@ -1,6 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from './api';
 
+// Images PNG placées dans client/src/ — Vite les bundle automatiquement
+const MIX_SOLO_URL = new URL('./mix-solo.png', import.meta.url).href;
+const MIX_1V1_URL  = new URL('./mix-1v1.png',  import.meta.url).href;
+
 // ─── spDirect : appelle Spotify directement (bypasse le serveur pour les artistes)
 // Le token refresh passe par le serveur (besoin du client_secret).
 // Tout le reste appelle api.spotify.com directement depuis le navigateur (CORS supporté).
@@ -101,6 +105,22 @@ const IC={
   dr:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   pl2:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
 };
+
+// Cover mix : photo artiste en background + ton PNG par-dessus
+function MixCoverTemplate({mode, artistUrl}){
+  const tplUrl = mode==='solo' ? MIX_SOLO_URL : MIX_1V1_URL;
+  return(
+    <div style={{position:'absolute',inset:0}}>
+      {/* Photo artiste derrière */}
+      {artistUrl
+        ? <img src={artistUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',objectPosition:'top'}} alt="" crossOrigin="anonymous"/>
+        : <div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(135deg,#0f3460,#16213e)':'linear-gradient(135deg,#533483,#7b2d8b)'}}/>
+      }
+      {/* Template PNG (fond transparent → photo visible) */}
+      <img src={tplUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt="" draggable="false"/>
+    </div>
+  );
+}
 
 function DynBg({url,mode}){
   const f={
@@ -703,15 +723,10 @@ export default function App(){
             {['solo','1v1'].map(mode=>{
               const active=mixPerso&&mixMode===mode;
               const bgImg=mode==='solo'?topArtists[0]?.images?.[0]?.url:topArtists[1]?.images?.[0]?.url;
-              const tpl=mode==='solo'?'/mix-solo.png':'/mix-1v1.png';
-              return(
+                  return(
                 <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'100%',aspectRatio:'1',boxShadow:active?'0 0 0 2px rgba(255,255,255,.8),0 0 0 5px rgba(255,255,255,.12)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
-                  {/* Photo artiste en background */}
-                  {bgImg&&<img src={bgImg} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',objectPosition:'top'}} alt="" crossOrigin="anonymous"/>}
-                  {/* Fallback gradient si pas de photo */}
-                  {!bgImg&&<div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(135deg,#0f3460,#16213e,#1a1a2e)':'linear-gradient(135deg,#533483,#7b2d8b,#a855f7)'}}/>}
-                  {/* Template PNG overlay */}
-                  <img src={tpl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt={`Mix ${mode}`} onError={e=>{e.target.style.display='none';}}/>
+                  {/* Template CSS (reproduit le design sans fichier externe) */}
+                  <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
                   {/* Indicateur sélectionné */}
                   {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓ Sélectionné</div>}
                 </div>
