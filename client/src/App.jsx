@@ -541,35 +541,28 @@ export default function App(){
     clearTimeout(artRef.current);
     if(artQ.length<2){setArtRes([]);return;}
     artRef.current=setTimeout(async()=>{
-      // spDirect = appel direct Spotify (bypass Railway → quota séparé du pool building)
-      // Fallback sur api.search (Railway) si direct échoue
-      const trySearch=async(q)=>{
-        try{
-          const r=await spDirect(`/search?q=${encodeURIComponent(q)}&type=artist&limit=6`);
-          return r.artists?.items||[];
-        }catch(e){
-          // Fallback Railway si spDirect échoue
-          try{
-            const r2=await api.search(q,'artist',6);
-            return r2.artists?.items||[];
-          }catch(e2){return[];}
-        }
-      };
+      // Séquentiel (pas parallel) pour ne pas saturer le throttle global
+      const items1=[];const items2=[];
       try{
-        const [items1,items2]=await Promise.all([
-          trySearch(`"${artQ}"`),  // exact
-          trySearch(artQ),          // fuzzy
-        ]);
-        const seen=new Set();
-        const combined=[...items1,...items2].filter(a=>{
-          if(seen.has(a.id))return false;seen.add(a.id);return true;
-        });
-        setArtRes(combined);
-        console.log('[MT] artist search:',combined.length,'résultats pour',artQ);
+        const r=await spDirect(`/search?q=${encodeURIComponent(artQ)}&type=artist&limit=6`);
+        items1.push(...(r.artists?.items||[]));
       }catch(e){
-        setArtRes([]);
+        if(e.message?.includes('429')){
+          setArtRes([]);
+          return; // fail fast sur 429 — pas de retry visible
+        }
       }
-    },350);
+      try{
+        const r=await spDirect(`/search?q=${encodeURIComponent(`"${artQ}"`)}&type=artist&limit=6`);
+        items2.push(...(r.artists?.items||[]));
+      }catch(e){}
+      const seen=new Set();
+      const combined=[...items1,...items2].filter(a=>{
+        if(seen.has(a.id))return false;seen.add(a.id);return true;
+      });
+      setArtRes(combined);
+      console.log('[MT] artist search:',combined.length,'résultats pour',artQ);
+    },400);
   },[artQ]); // dépendance artQ seulement — topArtists via ref
 
   const playTrack=useCallback(async(track)=>{
