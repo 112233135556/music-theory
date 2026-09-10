@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { api } from './api';
+import { api, spFetch as spDirect } from './api'; // spDirect partage le rate limiter global
 
 // Images PNG
 const MIX_SOLO_URL = new URL('./mix-solo.png', import.meta.url).href;
@@ -14,123 +14,6 @@ const YEAR_STEPS=Array.from({length:127},(_,i)=>1900+i); // 1900→2026
 const YN=126;
 const YEAR_LABELS=YEAR_STEPS.filter(y=>y%5===0||y===2026); // 1900,1905,...,2025,2026
 
-// ─── spDirect : appelle Spotify directement (bypasse le serveur pour les artistes)
-// Le token refresh passe par le serveur (besoin du client_secret).
-// Tout le reste appelle api.spotify.com directement depuis le navigateur (CORS supporté).
-async function spDirect(path) {
-  const expires = parseInt(localStorage.getItem('token_expires') || '0');
-  if (expires && Date.now() > expires - 60000) {
-    const rt = localStorage.getItem('refresh_token');
-    if (rt) {
-      try {
-        const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-        const res = await fetch(`${BASE}/auth/refresh`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: rt }),
-        });
-        const d = await res.json();
-        if (d.access_token) {
-          localStorage.setItem('access_token', d.access_token);
-          localStorage.setItem('token_expires', Date.now() + d.expires_in * 1000);
-        }
-      } catch (e) {}
-    }
-  }
-  const tok = localStorage.getItem('access_token');
-  const res = await fetch(`https://api.spotify.com/v1${path}`, {
-    headers: { Authorization: `Bearer ${tok}` },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Spotify ${res.status}: ${JSON.stringify(err)}`);
-  }
-  return res.json();
-}
-
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-:root{
-  --t1:hsla(0,0%,100%,.92);--t2:hsla(0,0%,100%,.6);--t3:hsla(0,0%,100%,.35);--t4:hsla(0,0%,100%,.18);
-  --mR:rgba(0,0,0,.14);--mRb:blur(16px) saturate(1.6) brightness(1.05);
-  --mT:rgba(0,0,0,.2);--mTb:blur(24px) saturate(1.7) brightness(1.06);
-  --le:inset 0 1px 0 rgba(255,255,255,.38),inset 0 0 0 1px rgba(255,255,255,.12),inset 0 -1px 0 rgba(255,255,255,.2);
-  --leS:inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(255,255,255,.18),inset 0 -1px 0 rgba(255,255,255,.3);
-  --cast:0 16px 40px -8px rgba(8,10,18,.55),0 4px 12px -2px rgba(8,10,18,.35);
-  --F:'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',system-ui,sans-serif;
-  --sp:cubic-bezier(0.16,1,0.3,1);
-  --BAR:clamp(48px,3.5vh,60px);--PB:clamp(56px,5vh,72px);
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-html,body,#root{height:100%;overflow:hidden;}
-body{font-family:var(--F);background:#09090b;color:var(--t1);}
-input,button{font-family:var(--F);}
-input::placeholder{color:var(--t3);}
-::-webkit-scrollbar{width:0;height:0;}
-.g2{background:var(--mR);backdrop-filter:var(--mRb);-webkit-backdrop-filter:var(--mRb);box-shadow:var(--le);}
-.g3{background:var(--mT);backdrop-filter:var(--mTb);-webkit-backdrop-filter:var(--mTb);box-shadow:var(--leS);}
-.bg{background:none;border:none;cursor:pointer;color:var(--t2);font-family:var(--F);}
-.bs{background:rgba(255,255,255,.95);color:#000;border:none;cursor:pointer;font-family:var(--F);font-weight:600;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes scaleIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
-@keyframes coverRev{from{filter:blur(28px) brightness(.12) saturate(0);transform:scale(.92)}to{filter:blur(0) brightness(1) saturate(1);transform:scale(1)}}
-@keyframes wave{0%,100%{transform:scaleY(1)}50%{transform:scaleY(2.8)}}
-@keyframes tp{0%,100%{opacity:1}50%{opacity:.6}}
-@keyframes kbDrift{0%{transform:scale(1.4) translate(0,0)}25%{transform:scale(1.5) translate(-2.5%,-1.5%)}50%{transform:scale(1.42) translate(2%,2%)}75%{transform:scale(1.5) translate(-1.5%,1.8%)}100%{transform:scale(1.4) translate(0,0)}}
-@keyframes bgFadeIn{from{opacity:0}to{opacity:1}}
-@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
-.fade{animation:fadeUp .45s var(--sp) both;}
-.scalein{animation:scaleIn .45s var(--sp) both;}
-.tg{color:#34d399;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(52,211,153,.45);}
-.ta{color:#fbbf24;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(251,191,36,.45);}
-.tr{color:#f87171;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(248,113,113,.45);animation:tp .5s ease-in-out infinite;}
-@keyframes spin{to{transform:rotate(360deg)}}
-.rs{position:relative;height:clamp(4px,.38vh,6px);background:rgba(255,255,255,.12);border-radius:999px;}
-.rs input[type=range]{-webkit-appearance:none;appearance:none;position:absolute;width:100%;height:100%;background:transparent;outline:none;pointer-events:none;margin:0;padding:0;border:none;top:0;left:0;}
-.rs input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:clamp(18px,1.7vh,24px);height:clamp(18px,1.7vh,24px);border-radius:50%;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.55);cursor:grab;pointer-events:all;transition:transform .1s,box-shadow .1s;}
-.rs input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.15);box-shadow:0 3px 16px rgba(0,0,0,.7);}
-.rs input[type=range]::-moz-range-thumb{width:clamp(18px,1.7vh,24px);height:clamp(18px,1.7vh,24px);border-radius:50%;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.55);cursor:grab;pointer-events:all;border:none;}
-`;
-
-function saveTokens({access_token,refresh_token,expires_in}){
-  localStorage.setItem('access_token',access_token);
-  localStorage.setItem('refresh_token',refresh_token);
-  localStorage.setItem('token_expires',Date.now()+parseInt(expires_in)*1000);
-}
-function isLoggedIn(){return!!localStorage.getItem('access_token');}
-function logout(){localStorage.clear();window.location.href='/';}
-
-const IC={
-  music:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>,
-  link:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
-  game:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4m-2-2v4M14 12h.01M17 12h.01"/></svg>,
-  srch:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>,
-  xm:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>,
-  bk:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>,
-  chR:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>,
-  pl:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>,
-  pa:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>,
-  pv:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" strokeWidth="2"/></svg>,
-  nx:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="4" x2="19" y2="20" stroke="currentColor" strokeWidth="2"/></svg>,
-  vl:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
-  dr:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
-  pl2:<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-};
-
-// Cover mix : photo artiste en background + ton PNG par-dessus
-function MixCoverTemplate({mode, artistUrl}){
-  const tplUrl = mode==='solo' ? MIX_SOLO_URL : MIX_1V1_URL;
-  return(
-    <div style={{position:'absolute',inset:0}}>
-      {/* Photo artiste derrière */}
-      {artistUrl
-        ? <img src={artistUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',objectPosition:'top'}} alt="" crossOrigin="anonymous"/>
-        : <div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(135deg,#0f3460,#16213e)':'linear-gradient(135deg,#533483,#7b2d8b)'}}/>
-      }
-      {/* Template PNG (fond transparent → photo visible) */}
-      <img src={tplUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt="" draggable="false"/>
-    </div>
-  );
-}
 
 function DynBg({url,mode}){
   const f={
@@ -669,8 +552,8 @@ export default function App(){
         for(const off of[0,6,12])jobs.push({q:`artist:"${a.name}" year:${y}`,off});
       }
       for(const off of[0,6,12,18,24,30])jobs.push({q:`artist:"${a.name}"`,off});
-      // Batch de 2 avec délai généreux pour préserver le quota Railway
-      const BATCH=2;
+      // Séquentiel — le rate limiter de api.js espace automatiquement les requêtes (450ms)
+      const BATCH=1;
       for(let i=0;i<jobs.length;i+=BATCH){
         const batch=jobs.slice(i,i+BATCH);
         const results=await Promise.allSettled(batch.map(({q,off})=>api.search(q,'track',6,off)));
@@ -690,10 +573,10 @@ export default function App(){
         // Si rate limit détecté → pause 5s avant de continuer
         if(has429){
           console.warn('[MT] 429 détecté → pause 5s');
-          await new Promise(r=>setTimeout(r,5000));
-        }else{
-          await new Promise(r=>setTimeout(r,350)); // préserve quota Railway
+          await new Promise(r=>setTimeout(r,10000));
+          console.warn('[MT] 429 → pause 10s');
         }
+        // Pas de délai supplémentaire — rate limiter dans api.js gère les 450ms
       }
     }
     return all;
