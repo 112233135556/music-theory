@@ -551,7 +551,6 @@ export default function App(){
     setTimeout(()=>{if(finalPool[0])playTrack(finalPool[0]);},500);
   },[mixPerso,selArts,yearMin,yearMax,rounds,dur,playTrack,fetchAllSongs]);
 
-  const doReveal
   const doReveal=useCallback(()=>{clearInterval(timerRef.current);setRevealed(true);setScreen('reveal');},[]);
 
   const nextRound=useCallback(()=>{
