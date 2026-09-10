@@ -672,3 +672,496 @@ export default function App(){
   };
 
   
+
+  // ─── startGame ──────────────────────────────────────────────────────────────
+  const startGame=useCallback(async()=>{
+    setLoading(true);setLoadingMsg('Initialisation…');setErr('');
+    let rawTracks=[];
+    try{
+      if(mixPerso&&mixMode==='solo'){
+        setLoadingMsg('Chargement de tes écoutes Spotify…');
+        const[s,m,l]=await Promise.all([
+          spDirect('/me/top/tracks?time_range=short_term&limit=50'),
+          spDirect('/me/top/tracks?time_range=medium_term&limit=50'),
+          spDirect('/me/top/tracks?time_range=long_term&limit=50'),
+        ]);
+        const seen=new Set();
+        const s_=s.items||[],m_=m.items||[],l_=l.items||[];
+        for(let i=0;i<Math.max(s_.length,m_.length,l_.length);i++){
+          for(const list of[s_,m_,l_]){
+            if(list[i]&&!seen.has(list[i].id)){seen.add(list[i].id);rawTracks.push(list[i]);}
+          }
+        }
+        setLoadingMsg(`${rawTracks.length} sons du mix…`);
+      }else if(!mixPerso){
+        rawTracks=await fetchAllSongsRef.current(selArts,yearMinRef.current,yearMaxRef.current,(msg,n)=>{
+          setLoadingMsg(msg);
+        });
+      }
+    }catch(e){
+      setErr(`Erreur : ${e.message}`);setLoading(false);setLoadingMsg('');return;
+    }
+    const playable=rawTracks.filter(t=>t.is_playable!==false);
+    const base=playable.length>0?playable:rawTracks;
+    const inRange=base.filter(t=>{
+      const y=parseInt(t.album?.release_date?.slice(0,4)||'0');
+      if(y===0)return true;
+      if(yearMin===yearMax)return y===yearMin;
+      return y>=yearMin&&y<=yearMax;
+    });
+    const pool=inRange.length>0?inRange:base;
+    if(!pool.length){
+      setErr(`Aucun son trouvé. Élargis la période ou change d'artiste.`);
+      setLoading(false);setLoadingMsg('');return;
+    }
+    const actualRounds=Math.min(roundsRef.current,pool.length);
+    const finalPool=rotatePool(pool,actualRounds,5);
+    if(gMode==='1v1'){
+      tempPoolRef.current=finalPool;setTempPool(finalPool);setRoomRole('host');setRoomCode('');roomCodeRef.current='';
+      let wsR=wsRef.current?.readyState===1;
+      if(!wsR){
+        try{
+          const ws=new WebSocket(WS_URL);wsRef.current=ws;
+          ws.onmessage=(e)=>{try{messageHandlerRef.current?.(JSON.parse(e.data));}catch(err){}};
+          ws.onclose=()=>setWsOk(false);
+          wsR=await new Promise(res=>{ws.onopen=()=>{setWsOk(true);res(true);};ws.onerror=()=>res(false);setTimeout(()=>res(false),5000);});
+        }catch(e){wsR=false;}
+      }
+      if(!wsR){setErr('Impossible de se connecter au serveur 1v1.');setLoading(false);setLoadingMsg('');return;}
+      wsRef.current.send(JSON.stringify({type:'create_room',settings:{rounds:actualRounds,dur:durRef.current},hostName:user?.display_name||'Host'}));
+      setLoadingMsg(`✓ ${finalPool.length} sons — En attente d'un joueur…`);
+      let waited=0;
+      while(!roomCodeRef.current&&waited<40){await new Promise(r=>setTimeout(r,100));waited++;}
+      setLoading(false);setLoadingMsg('');setScreen('waiting');return;
+    }
+    setPool(finalPool);setCIdx(0);setScore(0);setOpponentScore(0);setTimer(durRef.current);
+    setRevealed(false);setAnswer('');setProg(0);setRoundSolved(false);
+    setScreen('game');setLoading(false);setLoadingMsg('');
+    setTimeout(()=>{if(finalPool[0])playTrack(finalPool[0]);},500);
+  },[mixPerso,mixMode,selArts,yearMin,yearMax,rounds,dur,playTrack,gMode,user]);
+
+  const doReveal=useCallback(()=>{clearInterval(timerRef.current);setRevealed(true);setScreen('reveal');},[]);
+
+  const nextRound=useCallback(()=>{
+    const n=cIdx+1;
+    if(n>=pool.length){setScreen('end');return;}
+    setCIdx(n);setTimer(durRef.current);setRevealed(false);setAnswer('');setProg(0);setRoundSolved(false);
+    setScreen('game');
+    setTimeout(()=>{if(pool[n])playTrack(pool[n]);},200);
+  },[cIdx,pool,playTrack]);
+
+  // ─── Sync refs ──────────────────────────────────────────────────────────────
+  useEffect(()=>{doRevealRef.current=doReveal;},[doReveal]);
+  useEffect(()=>{nextRoundRef.current=nextRound;},[nextRound]);
+  useEffect(()=>{fetchAllSongsRef.current=fetchAllSongs;},[fetchAllSongs]);
+
+  const handlePause=useCallback(()=>{
+    setPaused(p=>{playerRef.current?.togglePlay();return!p;});
+  },[]);
+  useEffect(()=>{handlePauseRef.current=handlePause;},[handlePause]);
+
+  const handleVolume=useCallback((v)=>{
+    const sv=Math.max(0,Math.min(1,v));setVol(sv);
+    playerRef.current?.setVolume(sv).catch(()=>{});
+  },[]);
+
+  const handleAnswer=useCallback(async(val)=>{
+    setAnswer(val);
+    if(!val||val.length<2){setResults([]);return;}
+    clearTimeout(srchRef.current);
+    srchRef.current=setTimeout(async()=>{
+      try{const r=await api.search(val,'track',6);setResults(r.tracks?.items||[]);}catch(e){}
+    },280);
+  },[]);
+
+  const selectAnswer=useCallback((t)=>{
+    const curr=pool[cIdx];if(!curr)return;
+    setResults([]);
+    if(t.id===curr.id){
+      const pts=Math.max(1,Math.round((timer/dur)*5));
+      setScore(s=>s+pts);setRoundSolved(true);
+      if(roomRole)wsRef.current?.readyState===1&&wsRef.current.send(JSON.stringify({type:'answer_found',time:Math.max(0,dur-timer),score:score+pts}));
+      doReveal();
+    }else setAnswer('');
+  },[pool,cIdx,timer,dur,doReveal,roomRole,score]);
+
+  const toggleArtist=useCallback((a)=>{
+    setSelArts(p=>p.find(x=>x.id===a.id)?p.filter(x=>x.id!==a.id):[...p,a]);
+  },[]);
+
+  // ─── Computed vars ──────────────────────────────────────────────────────────
+  const track=pool[cIdx]||null;
+  const bgUrl=(screen==='game'||screen==='reveal')?track?.album?.images?.[0]?.url:topTracks[bgIdx]?.album?.images?.[0]?.url;
+  const bgMode=screen==='game'?'game':screen==='reveal'?'reveal':'cycle';
+  const showPB=screen==='game'||screen==='reveal';
+  const tc=timer>dur*.5?'g':timer>dur*.25?'a':'r';
+  const API_URL=import.meta.env.VITE_API_URL||'http://localhost:3001';
+  const topPad='var(--BAR)';
+  const botPad=showPB?'var(--PB)':'0px';
+  const isSearching=artQ.length>=2;
+  const filtLocal=isSearching?topArtists.filter(a=>a.name.toLowerCase().includes(artQ.toLowerCase())):topArtists;
+  const showSPRes=isSearching&&artRes.length>0;
+
+  // ─── SearchBar (autocomplete pendant le jeu) ────────────────────────────────
+  const SearchBar=(
+    <div style={{position:'relative',width:'clamp(260px,26vw,500px)'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'clamp(7px,.55vw,11px)',padding:'clamp(6px,.6vh,10px) clamp(12px,1vw,18px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)',borderRadius:'999px'}}>
+        <span style={{color:'var(--t3)',fontSize:'clamp(13px,.95vw,17px)',flexShrink:0,display:'flex'}}>{IC.srch}</span>
+        <input value={answer} onChange={e=>handleAnswer(e.target.value)} placeholder="Quel est ce morceau ?" autoFocus style={{background:'none',border:'none',outline:'none',color:'var(--t1)',fontSize:'clamp(12px,.85vw,16px)',flex:1,minWidth:0}}/>
+        {answer&&<button onClick={()=>{setAnswer('');setResults([]);}} className="bg" style={{fontSize:'clamp(13px,1vw,18px)',lineHeight:1,display:'flex'}}>{IC.xm}</button>}
+      </div>
+      {results.length>0&&(
+        <div style={{position:'absolute',top:'calc(100% + 8px)',left:0,right:0,zIndex:200,background:'rgba(12,12,18,.97)',backdropFilter:'blur(32px)',WebkitBackdropFilter:'blur(32px)',boxShadow:'var(--cast)',borderRadius:'clamp(10px,.8vw,16px)',overflow:'hidden',padding:'clamp(4px,.4vh,7px) 0'}}>
+          {results.map(t=>(
+            <div key={t.id} onMouseDown={()=>selectAnswer(t)} style={{display:'flex',alignItems:'center',gap:'clamp(10px,.8vw,14px)',padding:'clamp(8px,.75vh,12px) clamp(12px,1vw,18px)',cursor:'pointer',transition:'background .1s'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.06)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              {t.album?.images?.[0]?.url&&<img src={t.album.images[0].url} style={{width:'clamp(28px,2.5vh,40px)',height:'clamp(28px,2.5vh,40px)',borderRadius:'clamp(4px,.35vw,7px)',flexShrink:0,objectFit:'cover'}} alt=""/>}
+              <div>
+                <div style={{fontSize:'clamp(12px,.85vw,16px)',fontWeight:500}}>{t.name}</div>
+                <div style={{fontSize:'clamp(10px,.7vw,13px)',color:'var(--t3)'}}>{t.artists?.map(a=>a.name).join(', ')}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // ─── LOGIN ──────────────────────────────────────────────────────────────────
+  if(screen==='login'){return(<>
+    <style>{CSS}</style>
+    <DynBg url={null} mode="neutral"/>
+    <div style={{position:'relative',zIndex:10,height:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="fade" style={{textAlign:'center',maxWidth:'clamp(260px,28vw,380px)',padding:'0 clamp(18px,2vw,36px)'}}>
+        <p style={{fontSize:'clamp(9px,.68vw,12px)',fontWeight:500,color:'var(--t4)',letterSpacing:'.07em',marginBottom:'clamp(10px,1vh,16px)'}}>Béta privée</p>
+        <h1 style={{fontSize:'clamp(40px,5.5vw,88px)',fontWeight:700,letterSpacing:'-.046em',lineHeight:1,marginBottom:'clamp(10px,1vh,16px)'}}>music theory</h1>
+        <p style={{fontSize:'clamp(12px,.9vw,16px)',color:'var(--t2)',lineHeight:1.55,marginBottom:'clamp(26px,3vh,48px)'}}>Blindtest. Ta musique. Tes amis.</p>
+        <a href={`${API_URL}/auth/login`} style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(8px,.65vw,12px)',width:'100%',padding:'clamp(12px,1.2vh,18px) clamp(16px,1.5vw,28px)',borderRadius:'clamp(12px,1vw,18px)',textDecoration:'none',background:'rgba(255,255,255,.96)',color:'#000',fontSize:'clamp(12px,.9vw,17px)',fontWeight:600,boxShadow:'var(--cast)'}}>
+          <svg width="clamp(13px,1vw,17px)" height="clamp(13px,1vw,17px)" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+          Se connecter avec Spotify
+        </a>
+      </div>
+    </div>
+  </>);}
+
+  // ─── LOADING full-screen ────────────────────────────────────────────────────
+  if(loading){return(<>
+    <style>{CSS}</style>
+    <DynBg url={bgUrl} mode="neutral"/>
+    <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.82)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'clamp(14px,1.6vh,24px)'}}>
+      <div style={{width:'clamp(36px,3.5vh,52px)',height:'clamp(36px,3.5vh,52px)',borderRadius:'50%',border:'3px solid rgba(255,255,255,.12)',borderTopColor:'rgba(255,255,255,.85)',animation:'spin .75s linear infinite'}}/>
+      <p style={{fontSize:'clamp(13px,.95vw,18px)',color:'var(--t1)',fontWeight:500,maxWidth:'clamp(220px,28vw,420px)',textAlign:'center',lineHeight:1.45}}>{loadingMsg||'Chargement…'}</p>
+    </div>
+  </>);}
+
+  // ─── MAIN RETURN ────────────────────────────────────────────────────────────
+  return(<>
+    <style>{CSS}</style>
+    <DynBg url={bgUrl} mode={bgMode}/>
+    {showProfile&&<ProfileModal user={user} onClose={()=>setShowProfile(false)}/>}
+
+    {/* TOP BAR */}
+    {screen==='home'
+      ?<div style={{position:'fixed',top:0,left:0,right:0,zIndex:100,height:'var(--BAR)',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 clamp(16px,1.5vw,32px)',background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)'}}>
+          <span style={{fontSize:'clamp(13px,.95vw,18px)',fontWeight:700,letterSpacing:'-.028em'}}>music theory</span>
+          <div style={{display:'flex',alignItems:'center',gap:'clamp(7px,.55vw,12px)'}}>
+            <span style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)'}}>{user?.display_name}</span>
+            <button onClick={()=>setShowProfile(p=>!p)} className="bg" style={{padding:0,borderRadius:'50%'}}>
+              {user?.images?.[0]?.url?<img src={user.images[0].url} style={{width:'clamp(24px,1.9vh,32px)',height:'clamp(24px,1.9vh,32px)',borderRadius:'50%',objectFit:'cover',transition:'transform .15s',display:'block'}} alt="" onMouseEnter={e=>e.target.style.transform='scale(1.08)'} onMouseLeave={e=>e.target.style.transform='scale(1)'}/>:<div style={{width:'clamp(24px,1.9vh,32px)',height:'clamp(24px,1.9vh,32px)',borderRadius:'50%',background:'linear-gradient(135deg,#5865F2,#7c3aed)'}}/>}
+            </button>
+          </div>
+        </div>
+      :<TopBar label="Blind_Test" user={user} center={screen==='game'?SearchBar:null} onAv={()=>setShowProfile(p=>!p)} onQuit={(screen==='game'||screen==='reveal'||screen==='waiting')?()=>{
+          clearInterval(timerRef.current);clearInterval(progRef.current);
+          playerRef.current?.pause().catch(()=>{});
+          setMinIdx(105);setMaxIdx(YN);
+          setRoomRole(null);setRoomCode('');roomCodeRef.current='';
+          setOpponentScore(0);setOpponentInfo(null);setScreen('home');
+        }:null}/>
+    }
+
+    <div style={{position:'relative',zIndex:10,height:'100vh',paddingTop:topPad,paddingBottom:botPad,overflow:'hidden'}}>
+
+      {/* ── HOME */}
+      {screen==='home'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(18px,2vh,36px) clamp(20px,2vw,40px)'}}>
+        <div className="fade" style={{width:'100%',maxWidth:'min(560px,50vw)'}}>
+          <h1 style={{fontSize:'clamp(22px,2.5vw,44px)',fontWeight:700,letterSpacing:'-.035em',marginBottom:'clamp(4px,.4vh,8px)'}}>À quoi on joue, {user?.display_name?.split(' ')[0]} ?</h1>
+          <p style={{fontSize:'clamp(11px,.78vw,15px)',color:'var(--t2)',marginBottom:'clamp(20px,2.5vh,36px)'}}>Choisis un mode de jeu</p>
+          <div style={{display:'flex',flexDirection:'column',gap:'clamp(9px,.9vh,14px)'}}>
+            <div onClick={()=>setScreen('config')} style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',cursor:'pointer',transition:'background .15s'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.16)'}
+              onMouseLeave={e=>e.currentTarget.style.background='var(--mR)'}>
+              <div style={{width:'clamp(40px,3.8vh,56px)',height:'clamp(40px,3.8vh,56px)',borderRadius:'clamp(10px,.9vw,15px)',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#5865F2,#7c3aed)',flexShrink:0,fontSize:'clamp(17px,1.7vh,25px)',color:'rgba(255,255,255,.8)',boxShadow:'0 4px 16px rgba(88,101,242,.3)'}}>{IC.music}</div>
+              <div style={{flex:1}}><div style={{fontSize:'clamp(14px,.95vw,19px)',fontWeight:600,marginBottom:3}}>Blind_Test</div><div style={{fontSize:'clamp(11px,.76vw,15px)',color:'var(--t2)'}}>Solo ou 1v1 — devine les sons</div></div>
+              <span style={{color:'var(--t3)',fontSize:'clamp(17px,1.6vw,25px)',display:'flex'}}>{IC.chR}</span>
+            </div>
+            <div style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',cursor:'pointer',transition:'background .15s'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.1)'}
+              onMouseLeave={e=>e.currentTarget.style.background='var(--mR)'}
+              onClick={()=>setJoinOpen(o=>!o)}>
+              <div style={{display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)'}}>
+                <div style={{width:'clamp(40px,3.8vh,56px)',height:'clamp(40px,3.8vh,56px)',borderRadius:'clamp(10px,.9vw,15px)',display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.18)',flexShrink:0,fontSize:'clamp(17px,1.7vh,25px)',color:'rgba(255,255,255,.7)',boxShadow:'var(--le)'}}>{IC.link}</div>
+                <div style={{flex:1}}><div style={{fontSize:'clamp(14px,.95vw,19px)',fontWeight:600,marginBottom:3}}>Rejoindre</div><div style={{fontSize:'clamp(11px,.76vw,15px)',color:'var(--t2)'}}>Rejoindre avec un code</div></div>
+                <span style={{color:'var(--t3)',fontSize:'clamp(17px,1.6vw,25px)',display:'flex'}}>{joinOpen?IC.xm:IC.chR}</span>
+              </div>
+              {joinOpen&&<div style={{marginTop:'clamp(10px,1vh,16px)',display:'flex',gap:'clamp(8px,.7vw,12px)'}} onClick={e=>e.stopPropagation()}>
+                {err&&<div style={{width:'100%',fontSize:'clamp(10px,.72vw,13px)',color:'rgba(248,113,113,.85)',marginBottom:'clamp(4px,.4vh,7px)'}}>{err}</div>}
+                <input value={joinCode} onChange={e=>{setJoinCode(e.target.value.toUpperCase());setErr('');}} placeholder="Code de la partie" style={{flex:1,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.14)',borderRadius:'clamp(8px,.7vw,12px)',padding:'clamp(9px,.9vh,14px) clamp(12px,1vw,18px)',color:'var(--t1)',fontSize:'clamp(12px,.85vw,15px)',outline:'none',fontFamily:'var(--F)',letterSpacing:'.06em',fontWeight:600}} onKeyDown={e=>e.key==='Enter'&&joinCode.trim()&&(setRoomRole('guest'),wsRef.current?.readyState===1&&wsRef.current.send(JSON.stringify({type:'join_room',code:joinCode.trim().toUpperCase(),name:user?.display_name||'Joueur'})))}/>
+                <button onClick={()=>{if(!joinCode.trim()){setErr('Entre un code');return;}setRoomRole('guest');wsRef.current?.readyState===1&&wsRef.current.send(JSON.stringify({type:'join_room',code:joinCode.trim().toUpperCase(),name:user?.display_name||'Joueur'}));}} className="bs" style={{padding:'clamp(9px,.9vh,14px) clamp(16px,1.5vw,24px)',borderRadius:'clamp(8px,.7vw,12px)',fontSize:'clamp(12px,.85vw,15px)',flexShrink:0}}>Rejoindre</button>
+              </div>}
+            </div>
+            <div style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',opacity:.36,cursor:'not-allowed'}}>
+              <div style={{width:'clamp(40px,3.8vh,56px)',height:'clamp(40px,3.8vh,56px)',borderRadius:'clamp(10px,.9vw,15px)',display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.18)',flexShrink:0,fontSize:'clamp(17px,1.7vh,25px)',color:'rgba(255,255,255,.5)',boxShadow:'var(--le)'}}>{IC.game}</div>
+              <div style={{flex:1}}><div style={{fontSize:'clamp(14px,.95vw,19px)',fontWeight:600,marginBottom:3}}>Autres jeux</div><div style={{fontSize:'clamp(11px,.76vw,15px)',color:'var(--t2)'}}>Bientôt disponible</div></div>
+            </div>
+          </div>
+        </div>
+      </div>}
+
+      {/* ── CONFIG */}
+      {screen==='config'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(18px,1.8vh,32px) clamp(20px,2vw,40px)'}}>
+        <div className="fade" style={{width:'100%',maxWidth:'min(500px,44vw)'}}>
+          <button onClick={()=>setScreen('home')} className="bg" style={{fontSize:'clamp(11px,.8vw,15px)',marginBottom:'clamp(12px,1.2vh,20px)',display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex'}}>{IC.bk}</span>Retour</button>
+          <h1 style={{fontSize:'clamp(18px,1.8vw,30px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(14px,1.5vh,24px)'}}>Configurer</h1>
+          <div style={{display:'flex',flexDirection:'column',gap:'clamp(9px,.9vh,14px)'}}>
+            <div className="g2" style={{borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(13px,1.4vh,21px) clamp(15px,1.4vw,24px)'}}>
+              <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',marginBottom:'clamp(9px,.9vh,14px)',fontWeight:500}}>Mode</p>
+              <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)'}}><Pill active={gMode==='solo'} onClick={()=>setGMode('solo')}>Solo</Pill><Pill active={gMode==='1v1'} onClick={()=>setGMode('1v1')}>1 vs 1</Pill></div>
+            </div>
+            <div className="g2" style={{borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(13px,1.4vh,21px) clamp(15px,1.4vw,24px)'}}>
+              <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',marginBottom:'clamp(10px,1vh,16px)',fontWeight:500}}>Manches</p>
+              <div style={{display:'flex',alignItems:'center',gap:'clamp(14px,1.4vw,24px)'}}>
+                <button onClick={()=>setRounds(r=>Math.max(5,r-5))} style={{width:'clamp(28px,2.5vh,38px)',height:'clamp(28px,2.5vh,38px)',borderRadius:'50%',background:'rgba(0,0,0,.14)',border:'none',color:'var(--t1)',fontSize:'clamp(16px,1.5vh,22px)',cursor:'pointer',boxShadow:'var(--le)',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                <span style={{fontSize:'clamp(24px,2.6vw,42px)',fontWeight:700,minWidth:'clamp(46px,4.2vw,68px)',textAlign:'center',letterSpacing:'-.03em',fontVariantNumeric:'tabular-nums'}}>{rounds}</span>
+                <button onClick={()=>setRounds(r=>r+5)} style={{width:'clamp(28px,2.5vh,38px)',height:'clamp(28px,2.5vh,38px)',borderRadius:'50%',background:'rgba(0,0,0,.14)',border:'none',color:'var(--t1)',fontSize:'clamp(16px,1.5vh,22px)',cursor:'pointer',boxShadow:'var(--le)',display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+              </div>
+            </div>
+            <div className="g2" style={{borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(13px,1.4vh,21px) clamp(15px,1.4vw,24px)'}}>
+              <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',marginBottom:'clamp(9px,.9vh,14px)',fontWeight:500}}>Temps par manche</p>
+              <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)',flexWrap:'wrap'}}>{[15,20,30,45].map(d=><Pill key={d} active={dur===d} onClick={()=>setDur(d)}>{d}s</Pill>)}</div>
+            </div>
+            <button onClick={()=>setScreen('artists')} className="bs" style={{width:'100%',padding:'clamp(11px,1.1vh,17px)',borderRadius:'clamp(12px,1vw,18px)',fontSize:'clamp(12px,.88vw,16px)'}}>Choisir les artistes</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* ── ARTISTS */}
+      {screen==='artists'&&<div style={{height:'100%',overflowY:'auto',padding:'clamp(12px,1.2vh,20px) clamp(20px,2vw,40px) clamp(70px,7vh,110px)'}}>
+        <div style={{maxWidth:'min(1400px,92vw)',margin:'0 auto'}}>
+          <button onClick={()=>setScreen('config')} className="bg" style={{fontSize:'clamp(11px,.8vw,15px)',marginBottom:'clamp(11px,1.1vh,18px)',display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex'}}>{IC.bk}</span>Retour</button>
+          <h1 style={{fontSize:'clamp(18px,1.8vw,30px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(3px,.3vh,6px)'}}>Tes artistes</h1>
+          <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)',marginBottom:'clamp(12px,1.3vh,22px)'}}>Sélectionne depuis ton top ou recherche dans tout Spotify</p>
+          {/* Barre de recherche */}
+          <div className="g3" style={{borderRadius:'999px',padding:'clamp(8px,.8vh,13px) clamp(13px,1.2vw,20px)',display:'flex',alignItems:'center',gap:'clamp(7px,.6vw,12px)',marginBottom:'clamp(12px,1.3vh,20px)'}}>
+            <span style={{color:'var(--t3)',fontSize:'clamp(13px,1vw,18px)',display:'flex'}}>{IC.srch}</span>
+            <input value={artQ} onChange={e=>setArtQ(e.target.value)} placeholder="Rechercher un artiste Spotify…" style={{background:'none',border:'none',outline:'none',color:'var(--t1)',fontSize:'clamp(12px,.85vw,16px)',flex:1}}/>
+            {artQ&&<button onClick={()=>{setArtQ('');setArtRes([]);}} className="bg" style={{display:'flex'}}>{IC.xm}</button>}
+          </div>
+          {/* Dropdown résultats Spotify */}
+          {showSPRes&&<div style={{background:'rgba(12,12,18,.97)',backdropFilter:'blur(32px)',WebkitBackdropFilter:'blur(32px)',boxShadow:'var(--cast)',borderRadius:'clamp(10px,.8vw,16px)',overflow:'hidden',padding:'clamp(4px,.4vh,7px) 0',marginBottom:'clamp(12px,1.3vh,20px)'}}>
+            {artRes.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
+              <div key={a.id} onMouseDown={()=>toggleArtist(a)} style={{display:'flex',alignItems:'center',gap:'clamp(10px,.8vw,14px)',padding:'clamp(8px,.75vh,12px) clamp(12px,1vw,18px)',cursor:'pointer',transition:'background .1s'}}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.07)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                {a.images?.[0]?.url?<img src={a.images[0].url} style={{width:'clamp(32px,3vh,44px)',height:'clamp(32px,3vh,44px)',borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>:<div style={{width:'clamp(32px,3vh,44px)',height:'clamp(32px,3vh,44px)',borderRadius:'50%',background:'linear-gradient(135deg,#2a1a4a,#1a2a4a)',flexShrink:0}}/>}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'clamp(12px,.88vw,16px)',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
+                  <div style={{fontSize:'clamp(9px,.65vw,12px)',color:'var(--t3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    {topArtists.some(t=>t.id===a.id)?<span style={{color:'rgba(52,211,153,.7)'}}>Dans ton top</span>:<span style={{textTransform:'capitalize'}}>{a.genres?.[0]||''}</span>}
+                  </div>
+                </div>
+                {s&&<div style={{width:'clamp(18px,1.6vh,24px)',height:'clamp(18px,1.6vh,24px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(9px,.8vh,12px)',fontWeight:700,flexShrink:0}}>✓</div>}
+              </div>
+            );})}
+          </div>}
+          {/* Mix perso */}
+          <div onClick={()=>setMixPerso(!mixPerso)} style={{background:mixPerso?'rgba(88,101,242,.14)':'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:mixPerso?'inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(88,101,242,.3),inset 0 -1px 0 rgba(255,255,255,.3)':'var(--le)',borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(12px,1.3vh,20px) clamp(15px,1.4vw,24px)',display:'flex',alignItems:'center',gap:'clamp(11px,.95vw,18px)',cursor:'pointer',marginBottom:'clamp(12px,1.3vh,20px)',transition:'all .15s'}}>
+            <div style={{width:'clamp(36px,3.4vh,52px)',height:'clamp(36px,3.4vh,52px)',borderRadius:'clamp(9px,.8vw,14px)',flexShrink:0,background:'linear-gradient(135deg,#5865F2,#7c3aed,#ec4899)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(15px,1.5vh,22px)',color:'white',boxShadow:'0 4px 16px rgba(88,101,242,.28)'}}>{IC.music}</div>
+            <div style={{flex:1}}><div style={{fontSize:'clamp(12px,.87vw,17px)',fontWeight:600,marginBottom:3}}>Mix personnel {mixPerso&&'✓'}</div><div style={{fontSize:'clamp(10px,.73vw,14px)',color:'var(--t2)'}}>Sons de tes 3 périodes d'écoute (~150 tracks)</div></div>
+          </div>
+          {/* Erreur */}
+          {err&&<div style={{background:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.3)',borderRadius:'clamp(9px,.8vw,14px)',padding:'clamp(10px,1vh,16px) clamp(14px,1.3vw,20px)',marginBottom:'clamp(12px,1.3vh,20px)',fontSize:'clamp(11px,.8vw,14px)',color:'rgba(248,113,113,.9)'}}>{err}</div>}
+          {/* Grille top artistes */}
+          <p style={{fontSize:'clamp(9px,.67vw,13px)',fontWeight:500,color:'var(--t3)',marginBottom:'clamp(9px,.9vh,15px)'}}>{isSearching?`Ton top — "${artQ}"`:'Basé sur tes écoutes Spotify'}</p>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(55px,5.8vw,105px),1fr))',gap:'clamp(12px,1.2vw,22px)'}}>
+            {filtLocal.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
+              <div key={a.id} onClick={()=>toggleArtist(a)} style={{cursor:'pointer',textAlign:'center'}}>
+                <div style={{position:'relative',marginBottom:'clamp(5px,.5vh,8px)'}}>
+                  {a.images?.[0]?.url?<img src={a.images[0].url} style={{width:'100%',aspectRatio:'1',borderRadius:'50%',objectFit:'cover',display:'block',outline:s?'clamp(2px,.18vw,3px) solid rgba(255,255,255,.75)':'none',outlineOffset:'clamp(2px,.18vw,3px)',transition:'all .15s'}} alt={a.name}/>:<div style={{width:'100%',paddingBottom:'100%',borderRadius:'50%',background:'linear-gradient(135deg,#1a2a4a,#2a1a4a)',outline:s?'clamp(2px,.18vw,3px) solid rgba(255,255,255,.75)':'none',transition:'all .15s'}}/>}
+                  {s&&<div style={{position:'absolute',bottom:0,right:0,width:'clamp(15px,1.4vh,22px)',height:'clamp(15px,1.4vh,22px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(8px,.7vh,12px)',fontWeight:700}}>✓</div>}
+                </div>
+                <div style={{fontSize:'clamp(8px,.62vw,12px)',fontWeight:500,color:s?'var(--t1)':'var(--t2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
+              </div>
+            );})}
+          </div>
+          {/* Frise chronologique */}
+          <div style={{marginTop:'clamp(20px,2.5vh,36px)',padding:'clamp(10px,1.2vh,18px) 0'}}>
+            <p style={{fontSize:'clamp(9px,.67vw,13px)',fontWeight:500,color:'var(--t3)',marginBottom:'clamp(8px,.8vh,14px)'}}>
+              Période : <strong style={{color:'var(--t1)'}}>{yearMin}</strong> — <strong style={{color:'var(--t1)'}}>{yearMax}</strong>
+            </p>
+            <div style={{padding:'0 9px',marginBottom:8}}>
+              <div className="rs">
+                <div style={{position:'absolute',left:`calc(${minIdx/YN} * (100% - 18px) + 9px)`,width:`calc(${(maxIdx-minIdx)/YN} * (100% - 18px))`,height:4,background:'rgba(255,255,255,.8)',borderRadius:'999px',pointerEvents:'none'}}/>
+                <input type="range" min={0} max={YN} step={1} value={minIdx} onChange={e=>setMinIdx(Math.min(+e.target.value,maxIdx))} style={{zIndex:minIdx>YN-2?3:2}}/>
+                <input type="range" min={0} max={YN} step={1} value={maxIdx} onChange={e=>setMaxIdx(Math.max(+e.target.value,minIdx))} style={{zIndex:3}}/>
+              </div>
+            </div>
+            <div style={{position:'relative',height:18,padding:'0 9px'}}>
+              {YEAR_LABELS.map(y=>{
+                const i=y-1900;
+                const active=i===minIdx||i===maxIdx;
+                return(
+                  <span key={y}
+                    onClick={()=>{if(Math.abs(i-minIdx)<=Math.abs(i-maxIdx))setMinIdx(i);else setMaxIdx(i);}}
+                    style={{position:'absolute',left:`calc(${i/YN} * (100% - 18px) + 9px)`,transform:'translateX(-50%)',fontSize:10,color:active?'rgba(255,255,255,.9)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:active?700:400,whiteSpace:'nowrap',fontFamily:'var(--F)'}}
+                    onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
+                    onMouseLeave={e=>e.currentTarget.style.color=active?'rgba(255,255,255,.9)':'var(--t4)'}>{y}</span>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        {/* Barre bottom */}
+        <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:100,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
+          <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)',flex:1,overflowX:'auto',paddingBottom:2}}>
+            {mixPerso&&<div style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(3px,.3vh,6px) clamp(9px,.8vw,14px)',borderRadius:'999px',background:'rgba(88,101,242,.22)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.3),inset 0 0 0 1px rgba(88,101,242,.35)',flexShrink:0}}>
+              <span style={{fontSize:'clamp(10px,.72vw,14px)'}}>Mix perso</span>
+              <span onClick={()=>setMixPerso(false)} className="bg" style={{fontSize:'clamp(12px,.9vw,17px)',lineHeight:1,display:'flex'}}>{IC.xm}</span>
+            </div>}
+            {selArts.map(a=>(
+              <div key={a.id} style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(3px,.3vh,6px) clamp(9px,.8vw,14px) clamp(3px,.3vh,6px) clamp(5px,.4vw,8px)',borderRadius:'999px',background:'rgba(0,0,0,.14)',boxShadow:'var(--le)',flexShrink:0}}>
+                {a.images?.[0]?.url&&<img src={a.images[0].url} style={{width:'clamp(15px,1.4vh,22px)',height:'clamp(15px,1.4vh,22px)',borderRadius:'50%',objectFit:'cover'}} alt=""/>}
+                <span style={{fontSize:'clamp(10px,.72vw,14px)',whiteSpace:'nowrap'}}>{a.name}</span>
+                <span onClick={()=>toggleArtist(a)} className="bg" style={{fontSize:'clamp(12px,.9vw,17px)',lineHeight:1,display:'flex'}}>{IC.xm}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={startGame} disabled={loading||(!mixPerso&&selArts.length===0)} className="bs" style={{padding:'clamp(9px,.9vh,14px) clamp(22px,2.2vw,38px)',borderRadius:'999px',fontSize:'clamp(12px,.87vw,16px)',flexShrink:0,opacity:loading||(!mixPerso&&selArts.length===0)?0.4:1,transition:'opacity .2s'}}>
+            Lancer
+          </button>
+        </div>
+      </div>}
+
+      {/* ── WAITING 1v1 */}
+      {screen==='waiting'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(20px,2vh,40px)'}}>
+        <div className="fade" style={{textAlign:'center',maxWidth:'min(440px,80vw)'}}>
+          {roomRole==='host'?(
+            <>
+              <p style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t3)',marginBottom:'clamp(8px,.8vh,14px)',fontWeight:500}}>Partage ce code à ton adversaire</p>
+              <div style={{fontSize:'clamp(38px,5vw,72px)',fontWeight:800,letterSpacing:'.12em',marginBottom:'clamp(16px,1.8vh,26px)',fontVariantNumeric:'tabular-nums',minHeight:'1.2em'}}>
+                {roomCode||<span style={{fontSize:'clamp(16px,1.8vw,28px)',color:'var(--t3)',fontWeight:400}}>Génération…</span>}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',marginBottom:'clamp(20px,2.5vh,36px)'}}>
+                <div style={{width:'clamp(6px,.6vh,9px)',height:'clamp(6px,.6vh,9px)',borderRadius:'50%',background:'rgba(52,211,153,.8)',animation:'tp .9s ease-in-out infinite'}}/>
+                <span style={{fontSize:'clamp(12px,.88vw,16px)',color:'var(--t2)'}}>En attente d'un joueur…</span>
+              </div>
+              <div style={{display:'flex',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',flexWrap:'wrap'}}>
+                {roomCode&&<button onClick={()=>navigator.clipboard?.writeText(roomCode)} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Copier le code</button>}
+                <button onClick={()=>{setScreen('home');setRoomRole(null);setRoomCode('');roomCodeRef.current='';}} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Annuler</button>
+              </div>
+            </>
+          ):(
+            <>
+              <div style={{fontSize:'clamp(30px,3.8vw,58px)',fontWeight:800,letterSpacing:'.1em',marginBottom:'clamp(10px,1.2vh,18px)'}}>{roomCode}</div>
+              <div style={{display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',justifyContent:'center'}}>
+                <div style={{width:'clamp(6px,.6vh,9px)',height:'clamp(6px,.6vh,9px)',borderRadius:'50%',background:'rgba(52,211,153,.8)',animation:'tp .9s ease-in-out infinite'}}/>
+                <span style={{fontSize:'clamp(12px,.88vw,16px)',color:'var(--t2)'}}>Connecté — en attente que le host lance…</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>}
+
+      {/* ── GAME */}
+      {screen==='game'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(22px,3vw,60px)',padding:'clamp(14px,1.5vh,26px)'}}>
+        <MysteryCover url={track?.album?.images?.[0]?.url} sz="clamp(180px,22vh,340px)"/>
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.4vh,22px)'}}>
+          <div style={{background:'rgba(0,0,0,.7)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 1px rgba(255,255,255,.18)',borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(14px,1.4vw,24px)',display:'flex',alignItems:'center',gap:'clamp(10px,1vw,18px)'}}>
+            {user?.images?.[0]?.url&&<img src={user.images[0].url} style={{width:'clamp(18px,1.6vh,24px)',height:'clamp(18px,1.6vh,24px)',borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>}
+            <span style={{fontSize:'clamp(10px,.75vw,14px)',color:'var(--t2)',fontWeight:500}}>{user?.display_name?.split(' ')[0]}</span>
+            <span style={{color:'var(--t4)'}}>·</span>
+            <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Manche <strong style={{color:'var(--t1)'}}>{cIdx+1}</strong>/{pool.length}</span>
+            <span style={{color:'var(--t3)'}}>|</span>
+            <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Score <strong style={{color:'#34d399'}}>{score}</strong></span>
+          </div>
+          {roomRole&&opponentInfo&&<div style={{background:'rgba(0,0,0,.5)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',borderRadius:'999px',padding:'clamp(5px,.5vh,8px) clamp(12px,1.2vw,20px)',display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)'}}>
+            <span style={{color:'rgba(248,113,113,.8)',fontWeight:600}}>{opponentInfo.name}</span>
+            <span style={{color:'var(--t3)'}}>·</span>
+            <span>Score <strong style={{color:'rgba(248,113,113,.9)'}}>{opponentScore}</strong></span>
+          </div>}
+          <div style={{textAlign:'center'}}>
+            <div className={`t${tc}`} style={{fontSize:'clamp(50px,7.5vw,120px)',fontWeight:700,letterSpacing:'-.06em',lineHeight:1,fontVariantNumeric:'tabular-nums',transition:'color .5s',filter:'drop-shadow(0 0 clamp(12px,1.5vw,24px) currentColor)'}}>{timer}</div>
+            <div style={{height:'clamp(3px,.3vh,5px)',background:'rgba(255,255,255,.1)',borderRadius:'999px',marginTop:'clamp(8px,.8vh,14px)',width:'clamp(110px,13vw,220px)',overflow:'hidden'}}>
+              <div style={{height:'100%',width:`${(timer/dur)*100}%`,background:tc==='g'?'#34d399':tc==='a'?'#fbbf24':'#f87171',borderRadius:'999px',transition:'width 1s linear,background .5s'}}/>
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:'3px',height:'clamp(22px,2.8vh,40px)'}}>
+            {[6,14,22,10,18,28,8,16,24,12,26,14,7,20,24].map((h,i)=>(
+              <div key={i} style={{width:'clamp(3px,.25vw,5px)',height:h,borderRadius:3,background:`rgba(255,255,255,${.28+(i%3)*.08})`,transformOrigin:'center',animation:paused?'none':`wave ${.48+(i%5)*.12}s ease-in-out ${i*.055}s infinite`}}/>
+            ))}
+          </div>
+          <div style={{display:'flex',gap:'clamp(7px,.6vw,12px)'}}>
+            <button onClick={handlePause} className="g2 bg" style={{borderRadius:'999px',padding:'clamp(7px,.7vh,12px) clamp(14px,1.3vw,22px)',fontSize:'clamp(14px,1.2vh,20px)',display:'flex',alignItems:'center',justifyContent:'center',border:'none'}}>{paused?IC.pl:IC.pa}</button>
+            <button onClick={doReveal} className="g2 bg" style={{borderRadius:'999px',padding:'clamp(7px,.7vh,12px) clamp(14px,1.3vw,22px)',fontSize:'clamp(11px,.8vw,15px)',border:'none'}}>Passer</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* ── REVEAL */}
+      {screen==='reveal'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(14px,1.5vh,26px)'}}>
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(14px,1.8vh,28px)',width:'100%',maxWidth:'min(420px,38vw)'}}>
+          <div style={{width:'clamp(180px,22vh,320px)',height:'clamp(180px,22vh,320px)',borderRadius:'clamp(16px,1.5vw,26px)',overflow:'hidden',animation:'coverRev .75s var(--sp) forwards',boxShadow:'0 28px 80px rgba(0,0,0,.55),var(--leS)'}}>
+            {track?.album?.images?.[0]?.url?<img src={track.album.images[0].url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>:<div style={{width:'100%',height:'100%',background:'linear-gradient(135deg,#1a3a5a,#2a1a5a)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(50px,7vh,90px)',color:'var(--t1)'}}>{IC.music}</div>}
+          </div>
+          <div style={{textAlign:'center',animation:'fadeUp .4s ease .35s both',opacity:0}}>
+            <h2 style={{fontSize:'clamp(17px,1.8vw,30px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(4px,.4vh,8px)'}}>{track?.name}</h2>
+            <p style={{fontSize:'clamp(12px,.88vw,16px)',color:'rgba(255,255,255,.65)',marginBottom:'clamp(3px,.3vh,6px)'}}>
+              <a href={`https://open.spotify.com/artist/${track?.artists?.[0]?.id}`} target="_blank" rel="noopener noreferrer" style={{color:'var(--t1)',textDecoration:'underline',textDecorationColor:'rgba(255,255,255,.3)',cursor:'pointer'}}>{track?.artists?.map(a=>a.name).join(', ')}</a>
+            </p>
+            <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)'}}>{track?.album?.name} · {track?.album?.release_date?.slice(0,4)}</p>
+          </div>
+          <div className="g2" style={{borderRadius:'clamp(9px,.8vw,15px)',padding:'clamp(9px,.9vh,15px) clamp(16px,1.6vw,26px)',animation:'fadeUp .4s ease .5s both',opacity:0}}>
+            {roundSolved
+              ?<p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center'}}>Trouvé en <strong>{Math.max(0,dur-timer)}s</strong> — <span style={{color:'#34d399'}}>+{Math.max(1,Math.round((timer/dur)*5))} pts</span></p>
+              :<p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center',color:'var(--t3)'}}>Passé — <span style={{color:'rgba(248,113,113,.7)'}}>+0 pts</span></p>
+            }
+          </div>
+          {(!roomRole||roomRole==='host')&&<button onClick={()=>{
+            if(roomRole==='host')wsRef.current?.readyState===1&&wsRef.current.send(JSON.stringify({type:'host_control',action:'next'}));
+            nextRound();
+          }} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(28px,2.8vw,48px)',borderRadius:'999px',fontSize:'clamp(12px,.88vw,16px)',animation:'fadeUp .4s ease .74s both',opacity:0}}>
+            {cIdx+1>=pool.length?'Voir les scores':'Suivant'}
+          </button>}
+          {roomRole==='guest'&&<p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',animation:'fadeUp .4s ease .74s both',opacity:0}}>En attente du host…</p>}
+        </div>
+      </div>}
+
+      {/* ── END */}
+      {screen==='end'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(20px,2vh,40px)'}}>
+        <div className="scalein" style={{textAlign:'center'}}>
+          <p style={{fontSize:'clamp(11px,.8vw,16px)',color:'var(--t3)',marginBottom:'clamp(7px,.7vh,12px)'}}>Partie terminée</p>
+          <h1 style={{fontSize:'clamp(52px,7.5vw,120px)',fontWeight:700,letterSpacing:'-.055em',marginBottom:'clamp(5px,.5vh,10px)'}}>{score}</h1>
+          <p style={{fontSize:'clamp(13px,1.1vw,20px)',color:'var(--t2)',marginBottom:'clamp(26px,3vh,48px)'}}>points · {pool.length} manches</p>
+          <div style={{display:'flex',gap:'clamp(9px,.9vw,16px)',justifyContent:'center'}}>
+            <button onClick={()=>setScreen('home')} className="g2 bg" style={{borderRadius:'999px',padding:'clamp(11px,1.1vh,18px) clamp(22px,2.2vw,40px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Accueil</button>
+            <button onClick={startGame} className="bs" style={{borderRadius:'999px',padding:'clamp(11px,1.1vh,18px) clamp(22px,2.2vw,40px)',fontSize:'clamp(12px,.87vw,16px)'}}>Rejouer</button>
+          </div>
+        </div>
+      </div>}
+    </div>
+
+    {showPB&&<PlayerBar
+      track={track} paused={paused} prog={prog} vol={vol}
+      revealed={revealed} canSeek={revealed}
+      onPause={handlePause}
+      onVolume={handleVolume}
+      onSeek={e=>{
+        if(!revealed)return;
+        const r=e.currentTarget.getBoundingClientRect();
+        const pct=(e.clientX-r.left)/r.width;
+        if(track?.duration_ms){const pos=Math.floor(pct*track.duration_ms);setProg(Math.floor(pos/1000));playerRef.current?.seek(pos);}
+      }}
+    />}
+  </>);
+}
