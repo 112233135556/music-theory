@@ -70,6 +70,11 @@ input::placeholder{color:var(--t3);}
 .tg{color:#34d399;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(52,211,153,.45);}
 .ta{color:#fbbf24;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(251,191,36,.45);}
 .tr{color:#f87171;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(248,113,113,.45);animation:tp .5s ease-in-out infinite;}
+.rs{position:relative;height:clamp(4px,.38vh,6px);background:rgba(255,255,255,.12);border-radius:999px;}
+.rs input[type=range]{-webkit-appearance:none;appearance:none;position:absolute;width:100%;height:100%;background:transparent;outline:none;pointer-events:none;margin:0;padding:0;border:none;top:0;left:0;}
+.rs input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:clamp(18px,1.7vh,24px);height:clamp(18px,1.7vh,24px);border-radius:50%;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.55);cursor:grab;pointer-events:all;transition:transform .1s,box-shadow .1s;}
+.rs input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.15);box-shadow:0 3px 16px rgba(0,0,0,.7);}
+.rs input[type=range]::-moz-range-thumb{width:clamp(18px,1.7vh,24px);height:clamp(18px,1.7vh,24px);border-radius:50%;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.55);cursor:grab;pointer-events:all;border:none;}
 `;
 
 function saveTokens({access_token,refresh_token,expires_in}){
@@ -116,18 +121,21 @@ function DynBg({url,mode}){
 function MysteryCover({url,sz}){
   const s=sz||'clamp(180px,22vh,320px)';
   return(
-    <div style={{position:'relative',width:s,height:s,borderRadius:'clamp(16px,1.5vw,26px)',overflow:'hidden',flexShrink:0}}>
+    <div style={{position:'relative',width:s,height:s,borderRadius:'clamp(16px,1.5vw,26px)',overflow:'hidden',flexShrink:0,boxShadow:'0 0 0 1px rgba(255,255,255,.18), 0 16px 48px rgba(0,0,0,.7)'}}>
       {url&&<div style={{position:'absolute',inset:'-18px',backgroundImage:`url(${url})`,backgroundSize:'cover',backgroundPosition:'center',filter:'grayscale(100%) blur(30px) contrast(1.4) brightness(.3) saturate(0)'}}/>}
-      <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.3)',backdropFilter:'blur(4px)'}}/>
-      <div style={{position:'absolute',inset:0,zIndex:3,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--F)',fontSize:'clamp(56px,7vw,100px)',fontWeight:700,letterSpacing:'-.05em',color:'rgba(255,255,255,.75)',textShadow:'0 2px 28px rgba(0,0,0,.7)'}}>?</div>
-      <div style={{position:'absolute',inset:0,zIndex:4,borderRadius:'clamp(16px,1.5vw,26px)',boxShadow:'var(--leS)',pointerEvents:'none'}}/>
+      <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.35)',backdropFilter:'blur(4px)'}}/>
+      <div style={{position:'absolute',inset:0,zIndex:3,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--F)',fontSize:'clamp(56px,7vw,100px)',fontWeight:700,letterSpacing:'-.05em',color:'rgba(255,255,255,.85)',textShadow:'0 0 40px rgba(255,255,255,.25), 0 2px 8px rgba(0,0,0,.8)'}}>?</div>
+      <div style={{position:'absolute',inset:0,zIndex:4,borderRadius:'clamp(16px,1.5vw,26px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 0 1px rgba(255,255,255,.1)',pointerEvents:'none'}}/>
     </div>
   );
 }
 
-function TopBar({label,user,center,onAv,onQuit}){
+function TopBar({label,user,center,onAv,onQuit,dark}){
+  // dark=true (mode jeu, fond sombre) → fond plus opaque + bordure + ombre basse pour contraste
+  const bg=dark?'rgba(0,0,0,.38)':'rgba(0,0,0,.14)';
+  const sh=dark?'inset 0 1px 0 rgba(255,255,255,.28),inset 0 0 0 1px rgba(255,255,255,.08),inset 0 -1px 0 rgba(255,255,255,.12),0 2px 20px rgba(0,0,0,.5)':'var(--le)';
   return(
-    <div style={{position:'fixed',top:0,left:0,right:0,zIndex:100,height:'var(--BAR)',display:'flex',alignItems:'center',gap:'clamp(12px,1vw,20px)',padding:'0 clamp(16px,1.5vw,32px)',background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)'}}>
+    <div style={{position:'fixed',top:0,left:0,right:0,zIndex:100,height:'var(--BAR)',display:'flex',alignItems:'center',gap:'clamp(12px,1vw,20px)',padding:'0 clamp(16px,1.5vw,32px)',background:bg,backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:sh,transition:'background .4s, box-shadow .4s'}}>
       <div style={{flex:1,display:'flex',alignItems:'center',gap:'clamp(10px,.85vw,16px)'}}>
         {onQuit&&<button onClick={onQuit} className="bg" style={{fontSize:'clamp(12px,.9vw,15px)',display:'flex',alignItems:'center',gap:4,transition:'color .15s'}} onMouseEnter={e=>e.currentTarget.style.color='var(--t1)'} onMouseLeave={e=>e.currentTarget.style.color='var(--t2)'}><span style={{display:'flex'}}>{IC.bk}</span>Quitter</button>}
         <span style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:600,color:'var(--t3)',letterSpacing:'.02em',whiteSpace:'nowrap'}}>{label}</span>
@@ -182,7 +190,7 @@ function PlayerBar({track,paused,prog,onPause,onSeek,vol,onVolume,revealed,canSe
   const volRef=useRef(null);
   const seekRef=useRef(null);
   return(
-    <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:100,height:'var(--PB)',display:'flex',alignItems:'center',gap:'clamp(10px,.9vw,18px)',padding:'0 clamp(14px,1.4vw,28px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)'}}>
+    <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:100,height:'var(--PB)',display:'flex',alignItems:'center',gap:'clamp(10px,.9vw,18px)',padding:'0 clamp(14px,1.4vw,28px)',background:'rgba(0,0,0,.42)',backdropFilter:'blur(28px) saturate(1.8)',WebkitBackdropFilter:'blur(28px) saturate(1.8)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 0 1px rgba(255,255,255,.08),0 -2px 24px rgba(0,0,0,.5)'}}>
       <div style={{width:'clamp(34px,3vh,46px)',height:'clamp(34px,3vh,46px)',borderRadius:'clamp(5px,.45vw,9px)',flexShrink:0,position:'relative',overflow:'hidden',boxShadow:'var(--le)'}}>
         {track.album?.images?.[0]?.url&&<img src={track.album.images[0].url} style={{width:'100%',height:'100%',objectFit:'cover',filter:revealed?'none':'grayscale(100%) brightness(.28)',transition:'filter 1.2s ease'}} alt=""/>}
         {!revealed&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(12px,1.1vh,18px)',fontWeight:700,color:'rgba(255,255,255,.7)'}}>?</div>}
@@ -264,6 +272,9 @@ export default function App(){
   const[deviceId,setDeviceId]=useState(null);
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
+  const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
+  const[yearMin,setYearMin]=useState(1900);
+  const[yearMax,setYearMax]=useState(2026);
   const[joinCode,setJoinCode]=useState('');
   const[joinOpen,setJoinOpen]=useState(false);
   const[err,setErr]=useState('');
@@ -425,10 +436,21 @@ export default function App(){
       }
     }
     if(!tracks.length)return[];
+    // Dédupliquer
     const seen=new Set();
     const unique=tracks.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
-    return rotatePool(unique,rounds,5);
-  },[selArts,mixPerso,topTracks,rounds]);
+    // Filtrer par période de sortie
+    const inRange=unique.filter(t=>{
+      const y=parseInt(t.album?.release_date?.slice(0,4)||'0');
+      if(y===0)return true; // garder si pas de date
+      return y>=yearMin&&y<=yearMax;
+    });
+    if(!inRange.length){
+      setErr(`Aucun son trouvé entre ${yearMin} et ${yearMax}. Élargis la période.`);
+      return[];
+    }
+    return rotatePool(inRange,rounds,5);
+  },[selArts,mixPerso,topTracks,rounds,yearMin,yearMax]);
 
   const startGame=useCallback(async()=>{
     setLoading(true);setErr('');
@@ -505,6 +527,33 @@ export default function App(){
   const showSPRes=isSearching&&artRes.length>0;
   const showSearching=isSearching&&artRes.length===0;
 
+  // Barre de recherche artiste dans la TopBar (screen==='artists')
+  const ArtistSearchBar=(
+    <div style={{position:'relative',width:'clamp(260px,32vw,560px)'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'clamp(7px,.55vw,11px)',padding:'clamp(6px,.6vh,10px) clamp(12px,1vw,18px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)',borderRadius:'999px'}}>
+        <span style={{color:'var(--t3)',fontSize:'clamp(13px,.95vw,17px)',flexShrink:0,display:'flex'}}>{IC.srch}</span>
+        <input value={artQ} onChange={e=>setArtQ(e.target.value)} placeholder="Rechercher un artiste Spotify…" style={{background:'none',border:'none',outline:'none',color:'var(--t1)',fontSize:'clamp(12px,.85vw,16px)',flex:1,minWidth:0}}/>
+        {artQ&&<button onClick={()=>{setArtQ('');setArtRes([]);}} className="bg" style={{fontSize:'clamp(13px,1vw,18px)',lineHeight:1,display:'flex'}}>{IC.xm}</button>}
+      </div>
+      {showSPRes&&(
+        <div style={{position:'absolute',top:'calc(100% + 8px)',left:0,right:0,zIndex:300,background:'rgba(12,12,18,.97)',backdropFilter:'blur(32px)',WebkitBackdropFilter:'blur(32px)',boxShadow:'var(--cast)',borderRadius:'clamp(10px,.8vw,16px)',overflow:'hidden',padding:'clamp(4px,.4vh,7px) 0'}}>
+          {artRes.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
+            <div key={a.id} onMouseDown={()=>toggleArtist(a)} style={{display:'flex',alignItems:'center',gap:'clamp(10px,.8vw,14px)',padding:'clamp(8px,.75vh,12px) clamp(12px,1vw,18px)',cursor:'pointer',transition:'background .1s'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.07)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              {a.images?.[0]?.url?<img src={a.images[0].url} style={{width:'clamp(32px,3vh,44px)',height:'clamp(32px,3vh,44px)',borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>:<div style={{width:'clamp(32px,3vh,44px)',height:'clamp(32px,3vh,44px)',borderRadius:'50%',background:'linear-gradient(135deg,#2a1a4a,#1a2a4a)',flexShrink:0}}/>}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:'clamp(12px,.88vw,16px)',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
+                {a.genres?.[0]&&<div style={{fontSize:'clamp(9px,.65vw,12px)',color:'var(--t3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',textTransform:'capitalize'}}>{a.genres[0]}</div>}
+              </div>
+              {s&&<div style={{width:'clamp(18px,1.6vh,24px)',height:'clamp(18px,1.6vh,24px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(9px,.8vh,12px)',fontWeight:700,flexShrink:0}}>✓</div>}
+            </div>
+          );})}
+        </div>
+      )}
+    </div>
+  );
+
   const SearchBar=(
     <div style={{position:'relative',width:'clamp(260px,26vw,500px)'}}>
       <div style={{display:'flex',alignItems:'center',gap:'clamp(7px,.55vw,11px)',padding:'clamp(6px,.6vh,10px) clamp(12px,1vw,18px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)',borderRadius:'999px'}}>
@@ -563,7 +612,13 @@ export default function App(){
             </button>
           </div>
         </div>
-      :<TopBar label="Blind_Test" user={user} center={screen==='game'?SearchBar:null} onAv={()=>setShowProfile(p=>!p)} onQuit={(screen==='game'||screen==='reveal')?()=>{clearInterval(timerRef.current);setScreen('home');}:null}/>
+      :<TopBar
+          label={screen==='artists'?'blind_test':'Blind_Test'}
+          user={user}
+          center={screen==='game'?SearchBar:screen==='artists'?ArtistSearchBar:null}
+          onAv={()=>setShowProfile(p=>!p)}
+          onQuit={(screen==='game'||screen==='reveal')?()=>{clearInterval(timerRef.current);setScreen('home');}:null}
+          dark={screen==='game'||screen==='reveal'}/>
     }
 
     {/* CONTENT */}
@@ -573,7 +628,7 @@ export default function App(){
       {screen==='home'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(18px,2vh,36px) clamp(20px,2vw,40px)'}}>
         <div className="fade" style={{width:'100%',maxWidth:'min(560px,50vw)'}}>
           <h1 style={{fontSize:'clamp(22px,2.5vw,44px)',fontWeight:700,letterSpacing:'-.035em',marginBottom:'clamp(4px,.4vh,8px)'}}>À quoi on joue, {user?.display_name?.split(' ')[0]} ?</h1>
-          <p style={{fontSize:'clamp(11px,.78vw,15px)',color:'var(--t2)',marginBottom:'clamp(20px,2.5vh,36px)'}}>Choisis un mode de jeu</p>
+          <p style={{fontSize:'clamp(11px,.78vw,15px)',color:'var(--t2)',marginBottom:'clamp(20px,2.5vh,36px)'}}>Choisis ton mode de jeu</p>
           <div style={{display:'flex',flexDirection:'column',gap:'clamp(9px,.9vh,14px)'}}>
             <div onClick={()=>setScreen('config')} style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',cursor:'pointer',transition:'background .15s'}}
               onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.16)'}
@@ -633,77 +688,120 @@ export default function App(){
       </div>}
 
       {/* ── ARTISTS */}
-      {screen==='artists'&&<div style={{height:'100%',overflowY:'auto',padding:'clamp(12px,1.2vh,20px) clamp(20px,2vw,40px) clamp(70px,7vh,110px)'}}>
-        <div style={{maxWidth:'min(1400px,92vw)',margin:'0 auto'}}>
-          <button onClick={()=>setScreen('config')} className="bg" style={{fontSize:'clamp(11px,.8vw,15px)',marginBottom:'clamp(11px,1.1vh,18px)',display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex'}}>{IC.bk}</span>Retour</button>
-          <h1 style={{fontSize:'clamp(18px,1.8vw,30px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(3px,.3vh,6px)'}}>Tes artistes</h1>
-          <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)',marginBottom:'clamp(12px,1.3vh,22px)'}}>Sélectionne depuis ton top ou recherche dans tout Spotify</p>
-          <div className="g3" style={{borderRadius:'999px',padding:'clamp(8px,.8vh,13px) clamp(13px,1.2vw,20px)',display:'flex',alignItems:'center',gap:'clamp(7px,.6vw,12px)',marginBottom:'clamp(12px,1.3vh,20px)'}}>
-            <span style={{color:'var(--t3)',fontSize:'clamp(13px,1vw,18px)',display:'flex'}}>{IC.srch}</span>
-            <input value={artQ} onChange={e=>setArtQ(e.target.value)} placeholder="Rechercher n'importe quel artiste Spotify..." style={{background:'none',border:'none',outline:'none',color:'var(--t1)',fontSize:'clamp(12px,.85vw,16px)',flex:1}}/>
-            {artQ&&<button onClick={()=>{setArtQ('');setArtRes([]);}} className="bg" style={{display:'flex'}}>{IC.xm}</button>}
-          </div>
-          {/* Mix perso */}
-          <div onClick={()=>setMixPerso(!mixPerso)} style={{background:mixPerso?'rgba(88,101,242,.14)':'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:mixPerso?'inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(88,101,242,.3),inset 0 -1px 0 rgba(255,255,255,.3)':'var(--le)',borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(12px,1.3vh,20px) clamp(15px,1.4vw,24px)',display:'flex',alignItems:'center',gap:'clamp(11px,.95vw,18px)',cursor:'pointer',marginBottom:'clamp(12px,1.3vh,20px)',transition:'all .15s'}}>
-            <div style={{width:'clamp(36px,3.4vh,52px)',height:'clamp(36px,3.4vh,52px)',borderRadius:'clamp(9px,.8vw,14px)',flexShrink:0,background:'linear-gradient(135deg,#5865F2,#7c3aed,#ec4899)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(15px,1.5vh,22px)',color:'white',boxShadow:'0 4px 16px rgba(88,101,242,.28)'}}>{IC.music}</div>
-            <div style={{flex:1}}><div style={{fontSize:'clamp(12px,.87vw,17px)',fontWeight:600,marginBottom:3}}>Mix personnel {mixPerso&&'✓'}</div><div style={{fontSize:'clamp(10px,.73vw,14px)',color:'var(--t2)'}}>Sons de tes 3 périodes d'écoute (~150 tracks)</div></div>
-          </div>
-          {/* Error display */}
-          {err&&<div style={{background:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.3)',borderRadius:'clamp(9px,.8vw,14px)',padding:'clamp(10px,1vh,16px) clamp(14px,1.3vw,20px)',marginBottom:'clamp(12px,1.3vh,20px)',fontSize:'clamp(11px,.8vw,14px)',color:'rgba(248,113,113,.9)'}}>{err}</div>}
-          {/* Spotify search results */}
-          {showSPRes&&<>
-            <p style={{fontSize:'clamp(9px,.67vw,13px)',fontWeight:500,color:'rgba(88,101,242,.9)',marginBottom:'clamp(9px,.9vh,15px)'}}>Résultats Spotify</p>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(55px,5.8vw,105px),1fr))',gap:'clamp(12px,1.2vw,22px)',marginBottom:'clamp(16px,1.6vh,26px)'}}>
-              {artRes.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
-                <div key={a.id} onClick={()=>toggleArtist(a)} style={{cursor:'pointer',textAlign:'center'}}>
-                  <div style={{position:'relative',marginBottom:'clamp(5px,.5vh,8px)'}}>
-                    {a.images?.[0]?.url?<img src={a.images[0].url} style={{width:'100%',aspectRatio:'1',borderRadius:'50%',objectFit:'cover',display:'block',outline:s?'clamp(2px,.18vw,3px) solid rgba(255,255,255,.75)':'none',outlineOffset:'clamp(2px,.18vw,3px)',transition:'all .15s'}} alt={a.name}/>:<div style={{width:'100%',paddingBottom:'100%',borderRadius:'50%',background:'linear-gradient(135deg,#2a1a4a,#1a2a4a)',outline:s?'clamp(2px,.18vw,3px) solid rgba(255,255,255,.75)':'none'}}/>}
-                    {s?<div style={{position:'absolute',bottom:0,right:0,width:'clamp(15px,1.4vh,22px)',height:'clamp(15px,1.4vh,22px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(8px,.7vh,12px)',fontWeight:700}}>✓</div>:<div style={{position:'absolute',bottom:0,right:0,width:'clamp(15px,1.4vh,22px)',height:'clamp(15px,1.4vh,22px)',borderRadius:'50%',background:'rgba(88,101,242,.85)',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(9px,.8vh,13px)'}}>{IC.pl2}</div>}
-                  </div>
-                  <div style={{fontSize:'clamp(8px,.62vw,12px)',fontWeight:500,color:s?'var(--t1)':'var(--t2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
-                </div>
-              );})}
+      {screen==='artists'&&<div style={{height:'100%',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        {/* ════ ROW : colonne gauche + colonne droite ════ */}
+        <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
+
+          {/* ── COLONNE GAUCHE : Mix personnalisés ─────────── */}
+          <div style={{width:'clamp(200px,20vw,300px)',flexShrink:0,overflowY:'auto',padding:'clamp(14px,1.6vh,24px) clamp(14px,1.4vw,20px)',borderRight:'1px solid rgba(255,255,255,.07)',display:'flex',flexDirection:'column',gap:'clamp(12px,1.3vh,20px)'}}>
+            <div>
+              <h2 style={{fontSize:'clamp(14px,1.3vw,22px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(3px,.3vh,6px)'}}>Mix personnalisés</h2>
+              <p style={{fontSize:'clamp(9px,.67vw,13px)',color:'var(--t3)'}}>Basé sur tes écoutes Spotify</p>
             </div>
-          </>}
-          {showSearching&&<p style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t3)',marginBottom:'clamp(9px,.9vh,15px)',fontStyle:'italic'}}>Recherche "{artQ}" sur Spotify…</p>}
-          {!isSearching&&<p style={{fontSize:'clamp(9px,.67vw,13px)',fontWeight:500,color:'var(--t3)',marginBottom:'clamp(9px,.9vh,15px)'}}>Basé sur tes écoutes Spotify</p>}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(55px,5.8vw,105px),1fr))',gap:'clamp(12px,1.2vw,22px)'}}>
-            {filtLocal.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
-              <div key={a.id} onClick={()=>toggleArtist(a)} style={{cursor:'pointer',textAlign:'center'}}>
-                <div style={{position:'relative',marginBottom:'clamp(5px,.5vh,8px)'}}>
-                  {a.images?.[0]?.url?<img src={a.images[0].url} style={{width:'100%',aspectRatio:'1',borderRadius:'50%',objectFit:'cover',display:'block',outline:s?'clamp(2px,.18vw,3px) solid rgba(255,255,255,.75)':'none',outlineOffset:'clamp(2px,.18vw,3px)',transition:'all .15s'}} alt={a.name}/>:<div style={{width:'100%',paddingBottom:'100%',borderRadius:'50%',background:'linear-gradient(135deg,#1a2a4a,#2a1a4a)',outline:s?'clamp(2px,.18vw,3px) solid rgba(255,255,255,.75)':'none',transition:'all .15s'}}/>}
-                  {s&&<div style={{position:'absolute',bottom:0,right:0,width:'clamp(15px,1.4vh,22px)',height:'clamp(15px,1.4vh,22px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(8px,.7vh,12px)',fontWeight:700}}>✓</div>}
+            {/* Cards Solo + 1v1 */}
+            {['solo','1v1'].map(mode=>{
+              const active=mixPerso&&mixMode===mode;
+              const bgImg=mode==='solo'?topArtists[0]?.images?.[0]?.url:topArtists[1]?.images?.[0]?.url;
+              const tpl=mode==='solo'?'/mix-solo.png':'/mix-1v1.png';
+              return(
+                <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'100%',aspectRatio:'1',boxShadow:active?'0 0 0 2px rgba(255,255,255,.8),0 0 0 5px rgba(255,255,255,.12)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
+                  {/* Photo artiste en background */}
+                  {bgImg&&<img src={bgImg} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',objectPosition:'top'}} alt="" crossOrigin="anonymous"/>}
+                  {/* Fallback gradient si pas de photo */}
+                  {!bgImg&&<div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(135deg,#0f3460,#16213e,#1a1a2e)':'linear-gradient(135deg,#533483,#7b2d8b,#a855f7)'}}/>}
+                  {/* Template PNG overlay */}
+                  <img src={tpl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt={`Mix ${mode}`} onError={e=>{e.target.style.display='none';}}/>
+                  {/* Indicateur sélectionné */}
+                  {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓ Sélectionné</div>}
                 </div>
-                <div style={{fontSize:'clamp(8px,.62vw,12px)',fontWeight:500,color:s?'var(--t1)':'var(--t2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
-              </div>
-            );})}
+              );
+            })}
           </div>
-        </div>
-        {(selArts.length>0||mixPerso)&&<div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:100,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'var(--mT)',backdropFilter:'var(--mTb)',WebkitBackdropFilter:'var(--mTb)',boxShadow:'var(--leS)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
+
+          {/* ── COLONNE DROITE : Grille artistes ───────────── */}
+          <div style={{flex:1,overflowY:'auto',padding:'clamp(12px,1.2vh,20px) clamp(20px,2vw,36px) clamp(80px,8vh,120px)'}}>
+            <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
+              <button onClick={()=>setScreen('config')} className="bg" style={{fontSize:'clamp(11px,.8vw,15px)',marginBottom:'clamp(14px,1.6vh,22px)',display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex'}}>{IC.bk}</span>Retour</button>
+              <div style={{marginBottom:'clamp(16px,2vh,28px)'}}>
+                <h1 style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.92,marginBottom:'clamp(6px,.6vh,10px)'}}>Sélectionne un(e)<br/>ou des artistes</h1>
+                <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)'}}>Sélectionne depuis ton top ou recherche dans tout Spotify</p>
+              </div>
+              {err&&<div style={{background:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.3)',borderRadius:'clamp(9px,.8vw,14px)',padding:'clamp(10px,1vh,16px) clamp(14px,1.3vw,20px)',marginBottom:'clamp(12px,1.3vh,20px)',fontSize:'clamp(11px,.8vw,14px)',color:'rgba(248,113,113,.9)'}}>{err}</div>}
+              {/* Label */}
+              <p style={{fontSize:'clamp(10px,.7vw,13px)',fontWeight:600,color:'var(--t3)',letterSpacing:'.05em',textTransform:'uppercase',marginBottom:'clamp(12px,1.4vh,20px)'}}>Artistes écoutés récemment</p>
+              {/* Grille */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(85px,8.5vw,130px),1fr))',gap:'clamp(14px,1.6vw,26px)'}}>
+                {topArtists.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
+                  <div key={a.id} onClick={()=>toggleArtist(a)} style={{cursor:'pointer',textAlign:'center'}}>
+                    <div style={{position:'relative',marginBottom:'clamp(6px,.6vh,10px)'}}>
+                      {a.images?.[0]?.url
+                        ?<img src={a.images[0].url} style={{width:'100%',aspectRatio:'1',borderRadius:'50%',objectFit:'cover',display:'block',outline:s?'clamp(2.5px,.22vw,4px) solid rgba(255,255,255,.85)':'none',outlineOffset:'clamp(3px,.25vw,5px)',transition:'all .15s',boxShadow:s?'0 0 0 clamp(5px,.48vw,8px) rgba(255,255,255,.1)':'none'}} alt={a.name}/>
+                        :<div style={{width:'100%',paddingBottom:'100%',borderRadius:'50%',background:'linear-gradient(135deg,#1a2a4a,#2a1a4a)',outline:s?'clamp(2.5px,.22vw,4px) solid rgba(255,255,255,.85)':'none',outlineOffset:'clamp(3px,.25vw,5px)',transition:'all .15s'}}/>}
+                      {s&&<div style={{position:'absolute',bottom:0,right:0,width:'clamp(18px,1.7vh,26px)',height:'clamp(18px,1.7vh,26px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(9px,.8vh,13px)',fontWeight:700,boxShadow:'0 2px 8px rgba(0,0,0,.4)'}}>✓</div>}
+                    </div>
+                    <div style={{fontSize:'clamp(9px,.65vw,12px)',fontWeight:500,color:s?'var(--t1)':'var(--t2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
+                  </div>
+                );})}
+              </div>
+
+              {/* ── Frise chronologique ─── */}
+              <div style={{marginTop:'clamp(32px,4vh,56px)'}}>
+                <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'clamp(14px,1.6vh,22px)',gap:'clamp(12px,1.2vw,20px)'}}>
+                  <div>
+                    <h3 style={{fontSize:'clamp(18px,2vw,32px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.95,marginBottom:'clamp(5px,.5vh,8px)'}}>Période de sortie</h3>
+                    <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)'}}>Filtre les sons par année de release</p>
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <span style={{fontSize:'clamp(20px,2.4vw,40px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMin}</span>
+                    <span style={{fontSize:'clamp(12px,1.4vw,22px)',fontWeight:400,color:'var(--t3)',margin:'0 clamp(5px,.45vw,9px)'}}>—</span>
+                    <span style={{fontSize:'clamp(20px,2.4vw,40px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMax}</span>
+                  </div>
+                </div>
+                <div style={{padding:'0 clamp(10px,1vw,16px)',marginBottom:'clamp(10px,1vh,14px)'}}>
+                  <div className="rs">
+                    <div style={{position:'absolute',top:0,bottom:0,left:`${(yearMin-1900)/(2026-1900)*100}%`,width:`${(yearMax-yearMin)/(2026-1900)*100}%`,background:'rgba(255,255,255,.75)',borderRadius:'999px',pointerEvents:'none'}}/>
+                    <input type="range" min={1900} max={2026} step={1} value={yearMin} onChange={e=>setYearMin(Math.min(parseInt(e.target.value),yearMax-1))} style={{zIndex:yearMin>2015?3:2}}/>
+                    <input type="range" min={1900} max={2026} step={1} value={yearMax} onChange={e=>setYearMax(Math.max(parseInt(e.target.value),yearMin+1))} style={{zIndex:3}}/>
+                  </div>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',padding:'0 clamp(10px,1vw,16px)'}}>
+                  {[1900,1920,1940,1960,1980,2000,2010,2020,2026].map(y=>(
+                    <span key={y} onClick={()=>{if(Math.abs(y-yearMin)<=Math.abs(y-yearMax))setYearMin(Math.min(y,yearMax-1));else setYearMax(Math.max(y,yearMin+1));}} style={{fontSize:'clamp(8px,.58vw,11px)',color:'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s'}} onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'} onMouseLeave={e=>e.currentTarget.style.color='var(--t4)'}>{y}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>{/* fin row */}
+
+        {/* ── Barre inférieure ─── */}
+        {(selArts.length>0||mixPerso)&&<div style={{flexShrink:0,padding:'clamp(9px,.9vh,14px) clamp(18px,1.8vw,34px)',background:'rgba(0,0,0,.4)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.1),0 -2px 20px rgba(0,0,0,.4)',display:'flex',alignItems:'center',gap:'clamp(9px,.8vw,16px)'}}>
           <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)',flex:1,overflowX:'auto',paddingBottom:2}}>
-            {mixPerso&&<div style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(3px,.3vh,6px) clamp(9px,.8vw,14px)',borderRadius:'999px',background:'rgba(88,101,242,.22)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.3),inset 0 0 0 1px rgba(88,101,242,.35)',flexShrink:0}}>
-              <span style={{fontSize:'clamp(10px,.72vw,14px)'}}>Mix perso</span>
-              <span onClick={()=>setMixPerso(false)} className="bg" style={{fontSize:'clamp(12px,.9vw,17px)',lineHeight:1,display:'flex'}}>{IC.xm}</span>
+            {mixPerso&&<div style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(4px,.4vh,7px) clamp(10px,.9vw,16px)',borderRadius:'999px',background:mixMode==='1v1'?'rgba(168,85,247,.22)':'rgba(88,101,242,.22)',boxShadow:`inset 0 1px 0 rgba(255,255,255,.3),inset 0 0 0 1px ${mixMode==='1v1'?'rgba(168,85,247,.35)':'rgba(88,101,242,.35)'}`,flexShrink:0}}>
+              <span style={{fontSize:'clamp(10px,.72vw,14px)'}}>Mix {mixMode==='1v1'?'1v1':'Solo'}</span>
+              <span onClick={(e)=>{e.stopPropagation();setMixPerso(false);}} className="bg" style={{fontSize:'clamp(12px,.9vw,17px)',lineHeight:1,display:'flex'}}>{IC.xm}</span>
             </div>}
             {selArts.map(a=>(
-              <div key={a.id} style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(3px,.3vh,6px) clamp(9px,.8vw,14px) clamp(3px,.3vh,6px) clamp(5px,.4vw,8px)',borderRadius:'999px',background:'rgba(0,0,0,.14)',boxShadow:'var(--le)',flexShrink:0}}>
-                {a.images?.[0]?.url&&<img src={a.images[0].url} style={{width:'clamp(15px,1.4vh,22px)',height:'clamp(15px,1.4vh,22px)',borderRadius:'50%',objectFit:'cover'}} alt=""/>}
+              <div key={a.id} style={{display:'flex',alignItems:'center',gap:'clamp(5px,.4vw,8px)',padding:'clamp(4px,.4vh,7px) clamp(10px,.9vw,16px) clamp(4px,.4vh,7px) clamp(5px,.4vw,8px)',borderRadius:'999px',background:'rgba(255,255,255,.1)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.18)',flexShrink:0}}>
+                {a.images?.[0]?.url&&<img src={a.images[0].url} style={{width:'clamp(16px,1.5vh,22px)',height:'clamp(16px,1.5vh,22px)',borderRadius:'50%',objectFit:'cover'}} alt=""/>}
                 <span style={{fontSize:'clamp(10px,.72vw,14px)',whiteSpace:'nowrap'}}>{a.name}</span>
-                <span onClick={()=>toggleArtist(a)} className="bg" style={{fontSize:'clamp(12px,.9vw,17px)',lineHeight:1,display:'flex'}}>{IC.xm}</span>
+                <span onClick={(e)=>{e.stopPropagation();toggleArtist(a);}} className="bg" style={{fontSize:'clamp(12px,.9vw,17px)',lineHeight:1,display:'flex'}}>{IC.xm}</span>
               </div>
             ))}
           </div>
-          <button onClick={startGame} disabled={loading} className="bs" style={{padding:'clamp(9px,.9vh,14px) clamp(22px,2.2vw,38px)',borderRadius:'999px',fontSize:'clamp(12px,.87vw,16px)',flexShrink:0,opacity:loading?.6:1}}>
+          <button onClick={startGame} disabled={loading} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(24px,2.4vw,42px)',borderRadius:'999px',fontSize:'clamp(13px,.9vw,17px)',fontWeight:600,flexShrink:0,opacity:loading?.6:1,boxShadow:'0 4px 20px rgba(255,255,255,.2)'}}>
             {loading?'Chargement…':'Lancer'}
           </button>
         </div>}
       </div>}
 
-      {/* ── GAME */}
+            {/* ── GAME */}
       {screen==='game'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(22px,3vw,60px)',padding:'clamp(14px,1.5vh,26px)'}}>
         <MysteryCover url={track?.album?.images?.[0]?.url} sz="clamp(180px,22vh,340px)"/>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.4vh,22px)'}}>
-          <div className="g2" style={{borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(18px,1.8vw,30px)',display:'flex',gap:'clamp(14px,1.4vw,22px)'}}>
+          <div style={{background:'rgba(0,0,0,.35)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.25),inset 0 0 0 1px rgba(255,255,255,.1)',borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(18px,1.8vw,30px)',display:'flex',gap:'clamp(14px,1.4vw,22px)'}}>
             <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Manche <strong style={{color:'var(--t1)'}}>{cIdx+1}</strong>/{pool.length}</span>
             <span style={{color:'var(--t3)'}}>|</span>
             <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Score <strong style={{color:'var(--t1)'}}>{score}</strong></span>
@@ -720,8 +818,8 @@ export default function App(){
             ))}
           </div>
           <div style={{display:'flex',gap:'clamp(7px,.6vw,12px)'}}>
-            <button onClick={handlePause} className="g2 bg" style={{borderRadius:'999px',padding:'clamp(7px,.7vh,12px) clamp(14px,1.3vw,22px)',fontSize:'clamp(14px,1.2vh,20px)',display:'flex',alignItems:'center',justifyContent:'center',border:'none'}}>{paused?IC.pl:IC.pa}</button>
-            <button onClick={doReveal} className="g2 bg" style={{borderRadius:'999px',padding:'clamp(7px,.7vh,12px) clamp(14px,1.3vw,22px)',fontSize:'clamp(11px,.8vw,15px)',border:'none'}}>Passer</button>
+            <button onClick={handlePause} style={{borderRadius:'999px',padding:'clamp(7px,.7vh,12px) clamp(14px,1.3vw,22px)',fontSize:'clamp(14px,1.2vh,20px)',display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(255,255,255,.12)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',border:'1px solid rgba(255,255,255,.22)',color:'rgba(255,255,255,.9)',cursor:'pointer',transition:'all .15s'}} onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.22)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,.12)'}>{paused?IC.pl:IC.pa}</button>
+            <button onClick={doReveal} style={{borderRadius:'999px',padding:'clamp(7px,.7vh,12px) clamp(14px,1.3vw,22px)',fontSize:'clamp(11px,.8vw,15px)',background:'rgba(255,255,255,.08)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',border:'1px solid rgba(255,255,255,.16)',color:'rgba(255,255,255,.75)',cursor:'pointer',transition:'all .15s',fontFamily:'var(--F)'}} onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.16)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,.08)'}>Passer</button>
           </div>
         </div>
       </div>}
