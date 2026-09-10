@@ -84,6 +84,9 @@ export const api = {
 
   // Tracks d'un artiste via serveur (endpoint /api/artists/:id/tracks)
   artistTracks: (id) => apiFetch(`/api/artists/${id}/tracks`),
+  // Catalogue complet : albums puis tracks par batch
+  artistAlbums: (id) => apiFetch(`/api/artists/${id}/albums`),
+  albums: (ids) => apiFetch(`/api/albums?ids=${ids.join(',')}`),
 
   loginUrl: () => `${BASE}/auth/login`,
 };
