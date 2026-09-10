@@ -447,45 +447,40 @@ export default function App(){
     }else{
         for(const a of selArts){
         const artTracks=[];
-        console.log(`[MT] Fetching catalogue for ${a.name}...`);
+        console.log(`[MT] Catalogue ${a.name}...`);
         try{
-          // ── Étape 1 : récupérer tous les albums/singles de l'artiste
-          const albumsData=await api.artistAlbums(a.id);
+          // ── Direct Spotify (CORS OK pour ces endpoints, bypass serveur)
+          // Étape 1 : tous les albums + singles
+          const albumsData=await spDirect(`/artists/${encodeURIComponent(a.id)}/albums?include_groups=album,single&limit=50`);
           const allAlbumIds=(albumsData.items||[]).map(al=>al.id);
-          console.log(`[MT] ${a.name}: ${allAlbumIds.length} albums/singles trouvés`);
-          // ── Étape 2 : fetch par batch de 20 (limite Spotify)
+          console.log(`[MT] ${a.name}: ${allAlbumIds.length} releases`);
+          // Étape 2 : batch 20 albums → tracks complètes avec covers
           const BATCH=20;
           for(let i=0;i<allAlbumIds.length;i+=BATCH){
-            const batchIds=allAlbumIds.slice(i,i+BATCH);
+            const ids=allAlbumIds.slice(i,i+BATCH).join(',');
             try{
-              const batchData=await api.albums(batchIds);
-              for(const album of batchData.albums||[]){
+              const bd=await spDirect(`/albums?ids=${ids}`);
+              for(const album of bd.albums||[]){
                 if(!album)continue;
-                const albumInfo={id:album.id,name:album.name,images:album.images,release_date:album.release_date};
+                const ai={id:album.id,name:album.name,images:album.images,release_date:album.release_date};
                 for(const t of album.tracks?.items||[]){
-                  // Reconstruire un track complet avec infos album pour le jeu
-                  artTracks.push({
-                    id:t.id, name:t.name, duration_ms:t.duration_ms,
-                    artists:t.artists, preview_url:t.preview_url,
-                    album:albumInfo, // covers + date pour le reveal et le filtre
-                    popularity:0, // non dispo sur SimplifiedTrack, on l'ignore
-                  });
+                  artTracks.push({id:t.id,name:t.name,duration_ms:t.duration_ms,artists:t.artists,preview_url:t.preview_url,album:ai,popularity:0});
                 }
               }
-            }catch(e){ console.warn(`[MT] Batch ${i/BATCH+1} failed:`,e.message); }
+            }catch(e){console.warn(`[MT] Batch ${Math.ceil(i/BATCH)+1} fail`,e.message);}
           }
-          console.log(`[MT] ${a.name}: ${artTracks.length} sons au total (avant dédup)`);
+          console.log(`[MT] ${a.name}: ${artTracks.length} sons`);
         }catch(e){
-          console.warn(`[MT] Albums approach failed for ${a.name}:`,e.message);
-          // Fallback: search varié
-          const qs=[a.name,`"${a.name}"`,`${a.name} music`];
+          console.warn(`[MT] spDirect albums failed ${a.name}:`,e.message,'; fallback search');
+          // Fallback via serveur (search confirmé fonctionnel)
+          const qs=[a.name,`"${a.name}"`,`${a.name} music`,`${a.name} feat`];
           for(const q of qs){
             try{
               const r=await api.search(q,'track',6);
               artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
             }catch(e2){}
           }
-          console.log(`[MT] ${a.name}: ${artTracks.length} sons (fallback search)`);
+          console.log(`[MT] ${a.name}: ${artTracks.length} sons (fallback)`);
         }
         tracks.push(...artTracks);
       }
