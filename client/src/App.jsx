@@ -299,6 +299,7 @@ export default function App(){
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
   const[loadingMsg,setLoadingMsg]=useState('');
+  const[roundSolved,setRoundSolved]=useState(false); // true = trouvé, false = passé/timer
   const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
   const[minIdx,setMinIdx]=useState(105); // 2005
   // maxIdx déjà défini plus bas via useState(YN)
@@ -556,7 +557,7 @@ export default function App(){
   const nextRound=useCallback(()=>{
     const n=cIdx+1;
     if(n>=pool.length){setScreen('end');return;}
-    setCIdx(n);setTimer(dur);setRevealed(false);setAnswer('');setProg(0);
+    setCIdx(n);setTimer(dur);setRevealed(false);setAnswer('');setProg(0);setRoundSolved(false);
     setScreen('game');
     setTimeout(()=>{if(pool[n])playTrack(pool[n]);},200);
   },[cIdx,pool,dur,playTrack]);
@@ -588,7 +589,7 @@ export default function App(){
   const selectAnswer=useCallback((t)=>{
     const curr=pool[cIdx];if(!curr)return;
     setResults([]);
-    if(t.id===curr.id){setScore(s=>s+Math.max(1,Math.round((timer/dur)*5)));doReveal();}
+    if(t.id===curr.id){setScore(s=>s+Math.max(1,Math.round((timer/dur)*5)));setRoundSolved(true);doReveal();}
     else setAnswer('');
   },[pool,cIdx,timer,dur,doReveal]);
 
@@ -812,6 +813,11 @@ export default function App(){
                   <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
                   {/* Indicateur sélectionné */}
                   {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓ Sélectionné</div>}
+                  {/* Label mode en bas */}
+                  <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'clamp(8px,.8vh,12px)',background:'linear-gradient(to top,rgba(0,0,0,.7),transparent)',pointerEvents:'none'}}>
+                    <div style={{fontSize:'clamp(11px,.9vw,16px)',fontWeight:700,color:'white'}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
+                    <div style={{fontSize:'clamp(8px,.62vw,12px)',color:'rgba(255,255,255,.6)'}}>{mode==='solo'?'Tes écoutes':'Vos deux écoutes'}</div>
+                  </div>
                 </div>
               );
             })}
@@ -917,10 +923,14 @@ export default function App(){
       {screen==='game'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(22px,3vw,60px)',padding:'clamp(14px,1.5vh,26px)'}}>
         <MysteryCover url={track?.album?.images?.[0]?.url} sz="clamp(180px,22vh,340px)"/>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.4vh,22px)'}}>
-          <div style={{background:'rgba(0,0,0,.7)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 1px rgba(255,255,255,.18)',borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(18px,1.8vw,30px)',display:'flex',gap:'clamp(14px,1.4vw,22px)'}}>
+          <div style={{background:'rgba(0,0,0,.7)',backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',boxShadow:'inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 1px rgba(255,255,255,.18)',borderRadius:'999px',padding:'clamp(7px,.7vh,11px) clamp(14px,1.4vw,24px)',display:'flex',alignItems:'center',gap:'clamp(10px,1vw,18px)'}}>
+            {/* Avatar + pseudo */}
+            {user?.images?.[0]?.url&&<img src={user.images[0].url} style={{width:'clamp(18px,1.6vh,24px)',height:'clamp(18px,1.6vh,24px)',borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>}
+            <span style={{fontSize:'clamp(10px,.75vw,14px)',color:'var(--t2)',fontWeight:500}}>{user?.display_name?.split(' ')[0]}</span>
+            <span style={{color:'var(--t4)'}}>·</span>
             <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Manche <strong style={{color:'var(--t1)'}}>{cIdx+1}</strong>/{pool.length}</span>
             <span style={{color:'var(--t3)'}}>|</span>
-            <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Score <strong style={{color:'var(--t1)'}}>{score}</strong></span>
+            <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Score <strong style={{color:'#34d399'}}>{score}</strong></span>
           </div>
           <div style={{textAlign:'center'}}>
             <div className={`t${tc}`} style={{fontSize:'clamp(50px,7.5vw,120px)',fontWeight:700,letterSpacing:'-.06em',lineHeight:1,fontVariantNumeric:'tabular-nums',transition:'color .5s',filter:'drop-shadow(0 0 clamp(12px,1.5vw,24px) currentColor)'}}>{timer}</div>
@@ -955,7 +965,10 @@ export default function App(){
             {track?.popularity>0&&<p style={{fontSize:'clamp(10px,.72vw,14px)',color:'rgba(255,255,255,.45)',marginTop:'clamp(2px,.2vh,4px)'}}>Popularité Spotify : {track.popularity}/100</p>}
           </div>
           <div className="g2" style={{borderRadius:'clamp(9px,.8vw,15px)',padding:'clamp(9px,.9vh,15px) clamp(16px,1.6vw,26px)',animation:'fadeUp .4s ease .5s both',opacity:0}}>
-            <p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center'}}>Trouvé en <strong>{Math.max(0,dur-timer)}s</strong> — +{Math.max(1,Math.round((timer/dur)*5))} pts</p>
+            {roundSolved
+              ?<p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center'}}>Trouvé en <strong>{Math.max(0,dur-timer)}s</strong> — <span style={{color:'#34d399'}}>+{Math.max(1,Math.round((timer/dur)*5))} pts</span></p>
+              :<p style={{fontSize:'clamp(11px,.8vw,15px)',fontWeight:500,textAlign:'center',color:'var(--t3)'}}>Passé — <span style={{color:'rgba(248,113,113,.7)'}}>+0 pts</span></p>
+            }
           </div>
 
           <button onClick={nextRound} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(28px,2.8vw,48px)',borderRadius:'999px',fontSize:'clamp(12px,.88vw,16px)',animation:'fadeUp .4s ease .74s both',opacity:0}}>
