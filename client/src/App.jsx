@@ -23,6 +23,22 @@ function saveTokens({access_token,refresh_token,expires_in}){
 function isLoggedIn(){return!!localStorage.getItem('access_token');}
 function logout(){localStorage.clear();window.location.href='/';}
 
+function MixCoverTemplate({mode,artistUrl}){
+  const tplUrl=mode==='solo'?MIX_SOLO_URL:MIX_1V1_URL;
+  return(
+    <div style={{position:'absolute',inset:0}}>
+      {artistUrl
+        ?<img src={artistUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',objectPosition:'top'}} alt="" crossOrigin="anonymous"/>
+        :<div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(135deg,#0f3460,#16213e)':'linear-gradient(135deg,#533483,#7b2d8b)'}}/>
+      }
+      {/* Overlay dégradé sur la photo */}
+      <div style={{position:'absolute',inset:0,background:mode==='solo'?'linear-gradient(to bottom,rgba(10,5,30,.45),rgba(10,5,30,.62))':'linear-gradient(to bottom,rgba(30,5,30,.45),rgba(30,5,30,.62))'}}/>
+      {/* Template PNG par dessus */}
+      <img src={tplUrl} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt=""/>
+    </div>
+  );
+}
+
 function DynBg({url,mode}){
   const f={
     neutral:'saturate(1.8) brightness(.35) blur(clamp(55px,7vw,110px))',
