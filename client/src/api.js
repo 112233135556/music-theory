@@ -37,10 +37,18 @@ async function ensureFreshToken() {
   if (expires && Date.now() > expires - 60000) await refreshToken();
 }
 
+// ─── Rate limiter léger pour apiFetch (Railway) ──────────────────────────────
+let _lastRailway = 0;
+const RAILWAY_MS = 200; // 200ms minimum entre calls Railway (moins strict que direct)
+async function throttleRailway() {
+  const wait = Math.max(0, RAILWAY_MS - (Date.now() - _lastRailway));
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _lastRailway = Date.now();
+}
+
 // ─── apiFetch : appel via Railway (search, artistTracks) ─────────────────────
-// Pas de throttle client — Railway gère côté serveur
-// La recherche artiste passe par ici → réactive même pendant pool building
 async function apiFetch(path, _retry=1) {
+  await throttleRailway();
   await ensureFreshToken();
   const token = localStorage.getItem('access_token');
   const res = await fetch(`${BASE}${path}`, {
