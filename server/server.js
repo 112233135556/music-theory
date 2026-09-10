@@ -118,8 +118,11 @@ app.get('/api/recent', async (req,res) => {
 
 app.get('/api/search', async (req,res) => {
   const t = req.headers.authorization?.split(' ')[1];
-  const { q, type='track', limit=6 } = req.query;
-  try { res.json((await spGet(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`, t)).data); }
+  const { q, type='track', limit=6, offset=0 } = req.query;
+  try {
+    const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=${type}&limit=${parseInt(limit)}&offset=${parseInt(offset)}&market=FR`;
+    res.json((await spGet(url, t)).data);
+  }
   catch(e) { res.status(e.response?.status||500).json(e.response?.data); }
 });
 
