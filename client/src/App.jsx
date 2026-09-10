@@ -5,6 +5,10 @@ import { api } from './api';
 const MIX_SOLO_URL = new URL('./mix-solo.png', import.meta.url).href;
 const MIX_1V1_URL  = new URL('./mix-1v1.png',  import.meta.url).href;
 
+// WebSocket URL — même host que l'API REST
+const WS_URL=(import.meta.env.VITE_API_URL||'http://localhost:3001')
+  .replace('https://','wss://').replace('http://','ws://');
+
 // Frise — chaque année sélectionnable, labels affichés seulement en 0/5
 const YEAR_STEPS=Array.from({length:127},(_,i)=>1900+i); // 1900→2026
 const YN=126;
@@ -299,7 +303,14 @@ export default function App(){
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
   const[loadingMsg,setLoadingMsg]=useState('');
-  const[roundSolved,setRoundSolved]=useState(false); // true = trouvé, false = passé/timer
+  const[roundSolved,setRoundSolved]=useState(false);
+  // ── 1v1 states ──────────────────────────────────────────────────────────
+  const[wsOk,setWsOk]=useState(false);
+  const[roomCode,setRoomCode]=useState('');
+  const[roomRole,setRoomRole]=useState(null); // 'host'|'guest'|null
+  const[opponentScore,setOpponentScore]=useState(0);
+  const[opponentInfo,setOpponentInfo]=useState(null); // {name,avatar}
+  const[tempPool,setTempPool]=useState([]); // pool stocké pendant l'attente guest // true = trouvé, false = passé/timer
   const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
   const[minIdx,setMinIdx]=useState(105); // 2005
   // maxIdx déjà défini plus bas via useState(YN)
@@ -317,6 +328,13 @@ export default function App(){
   const playerRef=useRef(null);
   const selArtsRef=useRef([]);    // ref stable pour background loading
   const roundsRef=useRef(10);
+  const wsRef=useRef(null);         // WebSocket instance
+  const tempPoolRef=useRef([]);     // pool 1v1 en attente
+  const doRevealRef=useRef(null);   // ref vers doReveal pour WS handler
+  const nextRoundRef=useRef(null);  // ref vers nextRound
+  const handlePauseRef=useRef(null);
+  const playTrackRef=useRef(null);
+  const durRef=useRef(30);
   useEffect(()=>{selArtsRef.current=selArts;},[selArts]);
   useEffect(()=>{roundsRef.current=rounds;},[rounds]);
 
@@ -363,6 +381,79 @@ export default function App(){
       const s=document.createElement('script');s.src='https://sdk.scdn.co/spotify-player.js';document.head.appendChild(s);
     }
   },[screen==='login']);
+
+  // Sync refs pour WebSocket handler (toujours à jour)
+  useEffect(()=>{durRef.current=dur;},[dur]);
+  useEffect(()=>{roundsRef.current=rounds;},[rounds]);
+
+  // ── WebSocket 1v1 ─────────────────────────────────────────────────────────
+  // Handler WS (défini inline → toujours à jour via messageHandlerRef)
+  const messageHandlerRef=useRef(null);
+  messageHandlerRef.current=(msg)=>{
+    const send=(obj)=>wsRef.current?.readyState===1&&wsRef.current.send(JSON.stringify(obj));
+    switch(msg.type){
+      case 'room_created':
+        setRoomCode(msg.code);
+        break;
+      case 'guest_joined':{
+        setOpponentInfo({name:msg.name||'Joueur 2'});
+        const pool=tempPoolRef.current;
+        send({type:'game_start',tracks:pool});
+        setPool(pool);setCIdx(0);setScore(0);setOpponentScore(0);
+        setTimer(durRef.current);setRevealed(false);setAnswer('');setProg(0);
+        setRoundSolved(false);
+        setScreen('game');
+        setTimeout(()=>{if(pool[0])playTrackRef.current?.(pool[0]);},500);
+        break;}
+      case 'game_start':{
+        const tr=msg.tracks||[];
+        setPool(tr);setCIdx(0);setScore(0);setOpponentScore(0);
+        setTimer(durRef.current);setRevealed(false);setAnswer('');setProg(0);
+        setRoundSolved(false);
+        setScreen('game');
+        setTimeout(()=>{if(tr[0])playTrackRef.current?.(tr[0]);},500);
+        break;}
+      case 'opponent_found':
+        setOpponentScore(msg.score||0);
+        if(!doRevealRef.current)return;
+        doRevealRef.current();
+        break;
+      case 'host_control':
+        if(msg.action==='next')nextRoundRef.current?.();
+        if(msg.action==='pause')handlePauseRef.current?.();
+        break;
+      case 'room_joined':
+        setRoomCode((msg.code||'').toUpperCase());
+        setRoomRole('guest');
+        setScreen('waiting');
+        break;
+      case 'opponent_left':
+        setErr('Ton adversaire a quitté la partie.');
+        setRoomRole(null);setRoomCode('');
+        setScreen('home');
+        break;
+      case 'error':
+        setErr(msg.msg||'Erreur room — vérifie le code');
+        break;
+    }
+  };
+
+  // Connexion WebSocket dès la connexion Spotify
+  useEffect(()=>{
+    if(screen==='login')return;
+    const ws=new WebSocket(WS_URL);
+    wsRef.current=ws;
+    ws.onopen=()=>setWsOk(true);
+    ws.onclose=()=>setWsOk(false);
+    ws.onerror=()=>setWsOk(false);
+    ws.onmessage=(e)=>{try{messageHandlerRef.current?.(JSON.parse(e.data));}catch(err){}};
+    return()=>{ws.close();wsRef.current=null;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[screen==='login']);
+
+  const sendWS=useCallback((obj)=>{
+    if(wsRef.current?.readyState===1)wsRef.current.send(JSON.stringify(obj));
+  },[]);
 
   // BG rotation
   useEffect(()=>{
@@ -546,11 +637,24 @@ export default function App(){
     const rangeInfo=inRange.length<rawTracks.length?` sur la période ${yearMin}–${yearMax}`:'';
     setLoadingMsg(`✓ ${pool.length} sons${rangeInfo} — ${actualRounds} manches, c'est parti !`);
     await new Promise(r=>setTimeout(r,900));
-    setPool(finalPool);setCIdx(0);setScore(0);setTimer(dur);
-    setRevealed(false);setAnswer('');setProg(0);
+    if(gMode==='1v1'){
+      // 1v1 : stocker le pool + créer la room → attendre le guest
+      tempPoolRef.current=finalPool;
+      setTempPool(finalPool);
+      setRoomRole('host');
+      sendWS({type:'create_room',settings:{rounds:actualRounds,dur}});
+      setLoadingMsg(`✓ ${pool.length} sons — En attente d'un joueur...`);
+      await new Promise(r=>setTimeout(r,900));
+      setLoading(false);setLoadingMsg('');
+      setScreen('waiting');
+      return;
+    }
+    // Solo : lancer directement
+    setPool(finalPool);setCIdx(0);setScore(0);setOpponentScore(0);
+    setTimer(dur);setRevealed(false);setAnswer('');setProg(0);setRoundSolved(false);
     setScreen('game');setLoading(false);setLoadingMsg('');
     setTimeout(()=>{if(finalPool[0])playTrack(finalPool[0]);},500);
-  },[mixPerso,selArts,yearMin,yearMax,rounds,dur,playTrack,fetchAllSongs]);
+  },[mixPerso,selArts,yearMin,yearMax,rounds,dur,playTrack,fetchAllSongs,gMode,sendWS]);
 
   const doReveal=useCallback(()=>{clearInterval(timerRef.current);setRevealed(true);setScreen('reveal');},[]);
 
@@ -565,6 +669,12 @@ export default function App(){
   const handlePause=useCallback(()=>{
     setPaused(p=>{playerRef.current?.togglePlay();return!p;});
   },[]);
+
+  // ── Sync refs (pour WebSocket handler) ────────────────────────────────────
+  useEffect(()=>{doRevealRef.current=doReveal;},[doReveal]);
+  useEffect(()=>{nextRoundRef.current=nextRound;},[nextRound]);
+  useEffect(()=>{handlePauseRef.current=handlePause;},[handlePause]);
+  useEffect(()=>{playTrackRef.current=playTrack;},[playTrack]);
 
   const handleVolume=useCallback((v)=>{
     const safeVol=Math.max(0,Math.min(1,v));
@@ -589,7 +699,14 @@ export default function App(){
   const selectAnswer=useCallback((t)=>{
     const curr=pool[cIdx];if(!curr)return;
     setResults([]);
-    if(t.id===curr.id){setScore(s=>s+Math.max(1,Math.round((timer/dur)*5)));setRoundSolved(true);doReveal();}
+    if(t.id===curr.id){
+          const pts=Math.max(1,Math.round((timer/dur)*5));
+          const ns=score+pts;
+          setScore(ns);setRoundSolved(true);
+          // Broadcaster en 1v1 : l'adversaire voit le reveal aussi
+          if(roomRole){sendWS({type:'answer_found',time:Math.max(0,dur-timer),score:ns});}
+          doReveal();
+        }
     else setAnswer('');
   },[pool,cIdx,timer,dur,doReveal]);
 
@@ -752,7 +869,11 @@ export default function App(){
               </div>
               {joinOpen&&<div style={{marginTop:'clamp(10px,1vh,16px)',display:'flex',gap:'clamp(8px,.7vw,12px)'}} onClick={e=>e.stopPropagation()}>
                 <input value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase())} placeholder="Code de la partie (ex: MT·7K4X)" style={{flex:1,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.14)',borderRadius:'clamp(8px,.7vw,12px)',padding:'clamp(9px,.9vh,14px) clamp(12px,1vw,18px)',color:'var(--t1)',fontSize:'clamp(12px,.85vw,15px)',outline:'none',fontFamily:'var(--F)',letterSpacing:'.06em',fontWeight:600}} onKeyDown={e=>e.key==='Enter'&&alert('1v1 en cours de développement — bientôt disponible')}/>
-                <button onClick={()=>alert('1v1 en cours de développement — bientôt disponible')} className="bs" style={{padding:'clamp(9px,.9vh,14px) clamp(16px,1.5vw,24px)',borderRadius:'clamp(8px,.7vw,12px)',fontSize:'clamp(12px,.85vw,15px)',flexShrink:0}}>Rejoindre</button>
+                <button onClick={()=>{
+                  if(!joinCode.trim()){setErr('Entre un code de partie');return;}
+                  setRoomRole('guest');
+                  sendWS({type:'join_room',code:joinCode.trim().toUpperCase(),name:user?.display_name||'Joueur'});
+                }} className="bs" style={{padding:'clamp(9px,.9vh,14px) clamp(16px,1.5vw,24px)',borderRadius:'clamp(8px,.7vw,12px)',fontSize:'clamp(12px,.85vw,15px)',flexShrink:0}}>Rejoindre</button>
               </div>}
             </div>
             <div style={{background:'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:'var(--le)',borderRadius:'clamp(14px,1.2vw,22px)',padding:'clamp(15px,1.6vh,24px) clamp(17px,1.6vw,28px)',display:'flex',alignItems:'center',gap:'clamp(13px,1.1vw,20px)',opacity:.36,cursor:'not-allowed'}}>
@@ -919,7 +1040,32 @@ export default function App(){
         </div>
       </div>}
 
-            {/* ── GAME */}
+            {/* ── WAITING 1v1 */}
+      {screen==='waiting'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:'clamp(20px,2vh,40px)'}}>
+        <div className="fade" style={{textAlign:'center',maxWidth:'min(440px,80vw)'}}>
+          {roomRole==='host'?(
+            <>
+              <p style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t3)',marginBottom:'clamp(8px,.8vh,14px)',fontWeight:500}}>Partage ce code à ton adversaire</p>
+              <div style={{fontSize:'clamp(38px,5vw,72px)',fontWeight:800,letterSpacing:'.12em',marginBottom:'clamp(16px,1.8vh,26px)',fontVariantNumeric:'tabular-nums'}}>{roomCode}</div>
+              <div style={{display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',marginBottom:'clamp(20px,2.5vh,36px)'}}>
+                <div style={{width:'clamp(6px,.6vh,9px)',height:'clamp(6px,.6vh,9px)',borderRadius:'50%',background:'rgba(52,211,153,.8)',animation:'tp .9s ease-in-out infinite'}}/>
+                <span style={{fontSize:'clamp(12px,.88vw,16px)',color:'var(--t2)'}}>En attente d'un joueur…</span>
+              </div>
+              <button onClick={()=>{setScreen('home');setRoomRole(null);setRoomCode('');}} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Annuler</button>
+            </>
+          ):(
+            <>
+              <div style={{fontSize:'clamp(30px,3.8vw,58px)',fontWeight:800,letterSpacing:'.1em',marginBottom:'clamp(10px,1.2vh,18px)'}}>{roomCode}</div>
+              <div style={{display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',marginBottom:'clamp(20px,2.5vh,36px)'}}>
+                <div style={{width:'clamp(6px,.6vh,9px)',height:'clamp(6px,.6vh,9px)',borderRadius:'50%',background:'rgba(52,211,153,.8)',animation:'tp .9s ease-in-out infinite'}}/>
+                <span style={{fontSize:'clamp(12px,.88vw,16px)',color:'var(--t2)'}}>Connecté — en attente que le host lance…</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>}
+
+      {/* ── GAME */}
       {screen==='game'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:'clamp(22px,3vw,60px)',padding:'clamp(14px,1.5vh,26px)'}}>
         <MysteryCover url={track?.album?.images?.[0]?.url} sz="clamp(180px,22vh,340px)"/>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.4vh,22px)'}}>
@@ -932,6 +1078,12 @@ export default function App(){
             <span style={{color:'var(--t3)'}}>|</span>
             <span style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t2)'}}>Score <strong style={{color:'#34d399'}}>{score}</strong></span>
           </div>
+          {/* Score adversaire en 1v1 */}
+          {roomRole&&opponentInfo&&<div style={{background:'rgba(0,0,0,.5)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',borderRadius:'999px',padding:'clamp(5px,.5vh,8px) clamp(12px,1.2vw,20px)',display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)'}}>
+            <span style={{color:'rgba(248,113,113,.8)',fontWeight:600}}>{opponentInfo.name}</span>
+            <span style={{color:'var(--t3)'}}>·</span>
+            <span>Score <strong style={{color:'rgba(248,113,113,.9)'}}>{opponentScore}</strong></span>
+          </div>}
           <div style={{textAlign:'center'}}>
             <div className={`t${tc}`} style={{fontSize:'clamp(50px,7.5vw,120px)',fontWeight:700,letterSpacing:'-.06em',lineHeight:1,fontVariantNumeric:'tabular-nums',transition:'color .5s',filter:'drop-shadow(0 0 clamp(12px,1.5vw,24px) currentColor)'}}>{timer}</div>
             <div style={{height:'clamp(3px,.3vh,5px)',background:'rgba(255,255,255,.1)',borderRadius:'999px',marginTop:'clamp(8px,.8vh,14px)',width:'clamp(110px,13vw,220px)',overflow:'hidden'}}>
@@ -971,9 +1123,14 @@ export default function App(){
             }
           </div>
 
-          <button onClick={nextRound} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(28px,2.8vw,48px)',borderRadius:'999px',fontSize:'clamp(12px,.88vw,16px)',animation:'fadeUp .4s ease .74s both',opacity:0}}>
+          {/* En 1v1, seul le host clique Suivant — ça broadcast aux deux */}
+          {(!roomRole||roomRole==='host')&&<button onClick={()=>{
+            if(roomRole==='host')sendWS({type:'host_control',action:'next'});
+            nextRound();
+          }} className="bs" style={{padding:'clamp(10px,1vh,16px) clamp(28px,2.8vw,48px)',borderRadius:'999px',fontSize:'clamp(12px,.88vw,16px)',animation:'fadeUp .4s ease .74s both',opacity:0}}>
             {cIdx+1>=pool.length?'Voir les scores':'Suivant'}
-          </button>
+          </button>}
+          {roomRole==='guest'&&<p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',animation:'fadeUp .4s ease .74s both',opacity:0}}>En attente du host…</p>}
         </div>
       </div>}
 
