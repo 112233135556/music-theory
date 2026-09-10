@@ -227,7 +227,7 @@ function handleWS(ws, msg) {
   switch(msg.type) {
     case 'create_room': {
       const code = rand(4).toUpperCase();
-      rooms.set(code, { host:ws, guest:null, settings:msg.settings });
+      rooms.set(code, { host:ws, guest:null, settings:msg.settings, hostName:msg.hostName||'Host' });
       ws.roomCode=code; ws.role='host';
       send(ws, { type:'room_created', code }); break;
     }
@@ -236,7 +236,7 @@ function handleWS(ws, msg) {
       if (!r) return send(ws, { type:'error', msg:'Room introuvable' });
       if (r.guest) return send(ws, { type:'error', msg:'Room pleine' });
       r.guest=ws; ws.roomCode=msg.code.toUpperCase(); ws.role='guest';
-      send(ws, { type:'room_joined', settings:r.settings });
+      send(ws, { type:'room_joined', settings:r.settings, hostName:r.hostName||'Host' });
       send(r.host, { type:'guest_joined', name:msg.name||'Joueur 2' }); break;
     }
     case 'artist_update': {
