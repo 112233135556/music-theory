@@ -1,7 +1,15 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const SP   = 'https://api.spotify.com/v1';
-
-// ─── Token refresh (passe par le serveur — besoin du client_secret) ─────────
+// ─── Rate limiter UNIQUEMENT pour les calls directs Spotify (spFetch) ───────
+// apiFetch (Railway) n'a pas besoin de throttle côté client
+let _lastDirect = 0;
+const DIRECT_MS = 500; // 500ms entre calls directs Spotify
+async function throttleDirect() {
+  const wait = Math.max(0, DIRECT_MS - (Date.now() - _lastDirect));
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _lastDirect = Date.now();
+}
+// ─── Token refresh ────────────────────────────────────────────────────────────
 export async function refreshToken() {
   const refresh_token = localStorage.getItem('refresh_token');
   if (!refresh_token) return false;
@@ -20,48 +28,56 @@ export async function refreshToken() {
   } catch (e) { console.error('[api] refresh error', e); }
   return false;
 }
-
 async function ensureFreshToken() {
   const expires = parseInt(localStorage.getItem('token_expires') || '0');
   if (expires && Date.now() > expires - 60000) await refreshToken();
 }
 
-// ─── Appel via le serveur proxy (search, artistTracks) ───────────────────────
-// On route search et artistTracks par le serveur parce qu'ils fonctionnent
-// déjà pour l'autocomplete des sons — même chemin, mêmes headers.
-async function apiFetch(path) {
+// ─── apiFetch : appel via Railway (search, artistTracks) ─────────────────────
+// Pas de throttle client — Railway gère côté serveur
+// La recherche artiste passe par ici → réactive même pendant pool building
+async function apiFetch(path, _retry=1) {
   await ensureFreshToken();
   const token = localStorage.getItem('access_token');
   const res = await fetch(`${BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 429) {
+    if (_retry <= 0) throw new Error('Rate limit 429 — réessaie dans quelques secondes');
+    const wait = Math.max(5000, (parseInt(res.headers.get('Retry-After') || '5') + 1) * 1000);
+    console.warn(`[api] Railway 429 → retry dans ${Math.round(wait/1000)}s`);
+    await new Promise(r => setTimeout(r, wait));
+    return apiFetch(path, 0);
+  }
   if (!res.ok) throw new Error(`Server ${res.status}: ${path}`);
   return res.json();
 }
-
-// ─── Appel direct Spotify (données utilisateur) ───────────────────────────────
-// Les données perso (top tracks, top artists, me) fonctionnent en direct —
-// Spotify supporte CORS pour ces endpoints.
-export async function spFetch(path) {
+// ─── spFetch : appel direct Spotify (données perso uniquement) ────────────────
+// Throttlé à 500ms — utilisé SEULEMENT pour /me/top/* et /me (user data)
+export async function spFetch(path, _retry=1) {
+  await throttleDirect();
   await ensureFreshToken();
   const token = localStorage.getItem('access_token');
+  if (!token) throw new Error('No access token');
   const res = await fetch(`${SP}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 429) {
+    if (_retry <= 0) throw new Error('Rate limit 429');
+    const wait = Math.max(8000, (parseInt(res.headers.get('Retry-After') || '8') + 2) * 1000);
+    console.warn(`[api] Spotify 429 → retry dans ${Math.round(wait/1000)}s`);
+    await new Promise(r => setTimeout(r, wait));
+    return spFetch(path, 0);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Spotify ${res.status}: ${JSON.stringify(err)}`);
   }
   return res.json();
 }
-
 export const api = {
-  // Données perso — direct Spotify (CORS OK pour /me/top/*)
   me: () => spFetch('/me'),
   topTracks: (tr = 'medium_term') => spFetch(`/me/top/tracks?time_range=${tr}&limit=50`),
-  topArtists: (tr = 'medium_term') => spFetch(`/me/top/artists?time_range=${tr}&limit=50`),
-
-  // Mix perso = 3 périodes combinées (~150 tracks uniques)
   topTracksAll: async () => {
     const [s, m, l] = await Promise.all([
       spFetch('/me/top/tracks?time_range=short_term&limit=50'),
@@ -70,25 +86,17 @@ export const api = {
     ]);
     const seen = new Set();
     const all = [...(s.items||[]), ...(m.items||[]), ...(l.items||[])].filter(t => {
-      if (seen.has(t.id)) return false;
-      seen.add(t.id);
-      return true;
+      if (seen.has(t.id)) return false; seen.add(t.id); return true;
     });
     return { items: all };
   },
-
-  // Search via serveur — FONCTIONNE pour les sons (autocomplete en jeu),
-  // donc aussi pour les artistes. limit=6 identique à ce qui marche.
+  topArtists: (tr = 'medium_term') => spFetch(`/me/top/artists?time_range=${tr}&limit=50`),
+  // Search via Railway — PAS de throttle client, réactif pour la recherche artiste
   search: (q, type = 'track', limit = 6, offset = 0) =>
     apiFetch(`/api/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}&offset=${offset}`),
-
-  // Tracks d'un artiste via serveur (endpoint /api/artists/:id/tracks)
   artistTracks: (id) => apiFetch(`/api/artists/${id}/tracks`),
-  // Catalogue complet : server fait albums+tracks en une requête (pas de limit issues)
   artistAllTracks: (id) => apiFetch(`/api/artists/${id}/all-tracks`),
-  // Catalogue complet : albums puis tracks par batch
   artistAlbums: (id) => apiFetch(`/api/artists/${id}/albums`),
   albums: (ids) => apiFetch(`/api/albums?ids=${ids.join(',')}`),
-
   loginUrl: () => `${BASE}/auth/login`,
 };
