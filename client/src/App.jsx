@@ -330,6 +330,7 @@ export default function App(){
   const roundsRef=useRef(10);
   const wsRef=useRef(null);         // WebSocket instance
   const tempPoolRef=useRef([]);     // pool 1v1 en attente
+  const roomCodeRef=useRef('');     // ref du code room (lu dans la boucle d'attente)
   const doRevealRef=useRef(null);   // ref vers doReveal pour WS handler
   const nextRoundRef=useRef(null);  // ref vers nextRound
   const handlePauseRef=useRef(null);
@@ -394,6 +395,7 @@ export default function App(){
     switch(msg.type){
       case 'room_created':
         setRoomCode(msg.code);
+        roomCodeRef.current=msg.code; // sync ref pour la boucle d'attente dans startGame
         break;
       case 'guest_joined':{
         setOpponentInfo({name:msg.name||'Joueur 2'});
@@ -638,13 +640,40 @@ export default function App(){
     setLoadingMsg(`✓ ${pool.length} sons${rangeInfo} — ${actualRounds} manches, c'est parti !`);
     await new Promise(r=>setTimeout(r,900));
     if(gMode==='1v1'){
-      // 1v1 : stocker le pool + créer la room → attendre le guest
+      setLoadingMsg('Connexion au serveur 1v1…');
+      // Assure que la WS est bien connectée (reconnect si besoin)
+      let wsReady=wsRef.current?.readyState===1;
+      if(!wsReady){
+        try{
+          const ws=new WebSocket(WS_URL);
+          wsRef.current=ws;
+          ws.onmessage=(e)=>{try{messageHandlerRef.current?.(JSON.parse(e.data));}catch(err){}};
+          ws.onclose=()=>setWsOk(false);
+          wsReady=await new Promise(res=>{
+            ws.onopen=()=>{setWsOk(true);res(true);};
+            ws.onerror=()=>res(false);
+            setTimeout(()=>res(false),5000);
+          });
+        }catch(e){wsReady=false;}
+      }
+      if(!wsReady){
+        setErr('Impossible de rejoindre le serveur 1v1 — réessaie.');
+        setLoading(false);setLoadingMsg('');return;
+      }
+      // Stocker le pool + attendre le code de room (room_created)
       tempPoolRef.current=finalPool;
       setTempPool(finalPool);
       setRoomRole('host');
-      sendWS({type:'create_room',settings:{rounds:actualRounds,dur}});
-      setLoadingMsg(`✓ ${pool.length} sons — En attente d'un joueur...`);
-      await new Promise(r=>setTimeout(r,900));
+      setRoomCode(''); // va être rempli par room_created
+      // Créer la room — réponse arrive via messageHandlerRef (room_created → setRoomCode)
+      wsRef.current.send(JSON.stringify({type:'create_room',settings:{rounds:actualRounds,dur}}));
+      setLoadingMsg(`✓ ${pool.length} sons — Création de la room…`);
+      // Attendre que room_created arrive (max 4s)
+      let waited=0;
+      while(!roomCodeRef.current&&waited<40){
+        await new Promise(r=>setTimeout(r,100));
+        waited++;
+      }
       setLoading(false);setLoadingMsg('');
       setScreen('waiting');
       return;
@@ -836,6 +865,8 @@ export default function App(){
             clearInterval(progRef.current);
             playerRef.current?.pause().catch(()=>{});
             setMinIdx(105);setMaxIdx(YN); // reset frise
+            setRoomRole(null);setRoomCode('');roomCodeRef.current='';
+            setOpponentScore(0);setOpponentInfo(null);
             setScreen('home');
           }:null}
           dark={screen==='game'||screen==='reveal'}/>
@@ -1046,12 +1077,17 @@ export default function App(){
           {roomRole==='host'?(
             <>
               <p style={{fontSize:'clamp(11px,.8vw,15px)',color:'var(--t3)',marginBottom:'clamp(8px,.8vh,14px)',fontWeight:500}}>Partage ce code à ton adversaire</p>
-              <div style={{fontSize:'clamp(38px,5vw,72px)',fontWeight:800,letterSpacing:'.12em',marginBottom:'clamp(16px,1.8vh,26px)',fontVariantNumeric:'tabular-nums'}}>{roomCode}</div>
+              <div style={{fontSize:'clamp(38px,5vw,72px)',fontWeight:800,letterSpacing:'.12em',marginBottom:'clamp(16px,1.8vh,26px)',fontVariantNumeric:'tabular-nums',minHeight:'1.2em'}}>
+                {roomCode||<span style={{fontSize:'clamp(16px,1.8vw,28px)',color:'var(--t3)',fontWeight:400}}>Génération…</span>}
+              </div>
               <div style={{display:'flex',alignItems:'center',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',marginBottom:'clamp(20px,2.5vh,36px)'}}>
                 <div style={{width:'clamp(6px,.6vh,9px)',height:'clamp(6px,.6vh,9px)',borderRadius:'50%',background:'rgba(52,211,153,.8)',animation:'tp .9s ease-in-out infinite'}}/>
                 <span style={{fontSize:'clamp(12px,.88vw,16px)',color:'var(--t2)'}}>En attente d'un joueur…</span>
               </div>
-              <button onClick={()=>{setScreen('home');setRoomRole(null);setRoomCode('');}} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Annuler</button>
+              <div style={{display:'flex',gap:'clamp(8px,.7vw,12px)',justifyContent:'center',flexWrap:'wrap'}}>
+                {roomCode&&<button onClick={()=>navigator.clipboard?.writeText(roomCode)} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Copier le code</button>}
+                <button onClick={()=>{setScreen('home');setRoomRole(null);setRoomCode('');roomCodeRef.current='';}} className="btn-glass" style={{borderRadius:'999px',padding:'clamp(9px,.9vh,14px) clamp(20px,2vw,34px)',fontSize:'clamp(12px,.87vw,16px)',border:'none'}}>Annuler</button>
+              </div>
             </>
           ):(
             <>
