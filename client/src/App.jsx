@@ -447,29 +447,45 @@ export default function App(){
     }else{
         for(const a of selArts){
         const artTracks=[];
-        const filterFn=t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase());
-        // Requêtes variées via serveur (limit=6, endpoint confirmé fonctionnel)
-        const queries=[
-          a.name,
-          `"${a.name}"`,
-          `${a.name} music`,
-          `${a.name} rap`,
-          `${a.name} feat`,
-          `${a.name} new`,
-        ];
-        for(const q of queries){
-          try{
-            const r=await api.search(q,'track',6);
-            const items=r.tracks?.items||[];
-            artTracks.push(...items.filter(filterFn));
-          }catch(e){}
-          await new Promise(r=>setTimeout(r,80)); // éviter rate limit
-        }
-        // Top-tracks via serveur
-        try{const d=await api.artistTracks(a.id);artTracks.push(...(d.tracks||[]));}catch(e){}
-        // Si toujours vide, prendre sans filtre artiste strict
-        if(artTracks.length<3){
-          try{const r=await api.search(a.name,'track',6);artTracks.push(...(r.tracks?.items||[]));}catch(e){}
+        console.log(`[MT] Fetching catalogue for ${a.name}...`);
+        try{
+          // ── Étape 1 : récupérer tous les albums/singles de l'artiste
+          const albumsData=await api.artistAlbums(a.id);
+          const allAlbumIds=(albumsData.items||[]).map(al=>al.id);
+          console.log(`[MT] ${a.name}: ${allAlbumIds.length} albums/singles trouvés`);
+          // ── Étape 2 : fetch par batch de 20 (limite Spotify)
+          const BATCH=20;
+          for(let i=0;i<allAlbumIds.length;i+=BATCH){
+            const batchIds=allAlbumIds.slice(i,i+BATCH);
+            try{
+              const batchData=await api.albums(batchIds);
+              for(const album of batchData.albums||[]){
+                if(!album)continue;
+                const albumInfo={id:album.id,name:album.name,images:album.images,release_date:album.release_date};
+                for(const t of album.tracks?.items||[]){
+                  // Reconstruire un track complet avec infos album pour le jeu
+                  artTracks.push({
+                    id:t.id, name:t.name, duration_ms:t.duration_ms,
+                    artists:t.artists, preview_url:t.preview_url,
+                    album:albumInfo, // covers + date pour le reveal et le filtre
+                    popularity:0, // non dispo sur SimplifiedTrack, on l'ignore
+                  });
+                }
+              }
+            }catch(e){ console.warn(`[MT] Batch ${i/BATCH+1} failed:`,e.message); }
+          }
+          console.log(`[MT] ${a.name}: ${artTracks.length} sons au total (avant dédup)`);
+        }catch(e){
+          console.warn(`[MT] Albums approach failed for ${a.name}:`,e.message);
+          // Fallback: search varié
+          const qs=[a.name,`"${a.name}"`,`${a.name} music`];
+          for(const q of qs){
+            try{
+              const r=await api.search(q,'track',6);
+              artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
+            }catch(e2){}
+          }
+          console.log(`[MT] ${a.name}: ${artTracks.length} sons (fallback search)`);
         }
         tracks.push(...artTracks);
       }
