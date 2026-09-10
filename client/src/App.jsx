@@ -293,7 +293,7 @@ export default function App(){
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
   const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
-  const[yearMin,setYearMin]=useState(1900);
+  const[yearMin,setYearMin]=useState(1980);
   const[yearMax,setYearMax]=useState(2026);
   const[joinCode,setJoinCode]=useState('');
   const[joinOpen,setJoinOpen]=useState(false);
@@ -714,8 +714,8 @@ export default function App(){
         <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
 
           {/* ── COLONNE GAUCHE : Mix personnalisés ─────────── */}
-          <div style={{width:'clamp(200px,20vw,300px)',flexShrink:0,overflowY:'auto',padding:'clamp(14px,1.6vh,24px) clamp(14px,1.4vw,20px)',borderRight:'1px solid rgba(255,255,255,.07)',display:'flex',flexDirection:'column',gap:'clamp(12px,1.3vh,20px)'}}>
-            <div>
+          <div style={{width:'clamp(200px,20vw,300px)',flexShrink:0,overflowY:'auto',padding:'clamp(14px,1.6vh,24px) clamp(14px,1.4vw,20px)',borderRight:'1px solid rgba(255,255,255,.07)',display:'flex',flexDirection:'column',alignItems:'center',gap:'clamp(12px,1.3vh,20px)'}}>
+            <div style={{width:'100%'}}>
               <h2 style={{fontSize:'clamp(14px,1.3vw,22px)',fontWeight:700,letterSpacing:'-.03em',marginBottom:'clamp(3px,.3vh,6px)'}}>Mix personnalisés</h2>
               <p style={{fontSize:'clamp(9px,.67vw,13px)',color:'var(--t3)'}}>Basé sur tes écoutes Spotify</p>
             </div>
@@ -724,7 +724,7 @@ export default function App(){
               const active=mixPerso&&mixMode===mode;
               const bgImg=mode==='solo'?topArtists[0]?.images?.[0]?.url:topArtists[1]?.images?.[0]?.url;
                   return(
-                <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'100%',aspectRatio:'1',boxShadow:active?'0 0 0 2px rgba(255,255,255,.8),0 0 0 5px rgba(255,255,255,.12)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
+                <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'min(100%,clamp(160px,16vw,250px))',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
                   {/* Template CSS (reproduit le design sans fichier externe) */}
                   <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
                   {/* Indicateur sélectionné */}
@@ -734,19 +734,20 @@ export default function App(){
             })}
           </div>
 
-          {/* ── COLONNE DROITE : Grille artistes ───────────── */}
-          <div style={{flex:1,overflowY:'auto',padding:'clamp(12px,1.2vh,20px) clamp(20px,2vw,36px) clamp(80px,8vh,120px)'}}>
-            <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
-              <button onClick={()=>setScreen('config')} className="bg" style={{fontSize:'clamp(11px,.8vw,15px)',marginBottom:'clamp(14px,1.6vh,22px)',display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex'}}>{IC.bk}</span>Retour</button>
-              <div style={{marginBottom:'clamp(16px,2vh,28px)'}}>
-                <h1 style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.92,marginBottom:'clamp(6px,.6vh,10px)'}}>Sélectionne un(e)<br/>ou des artistes</h1>
-                <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)'}}>Sélectionne depuis ton top ou recherche dans tout Spotify</p>
-              </div>
-              {err&&<div style={{background:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.3)',borderRadius:'clamp(9px,.8vw,14px)',padding:'clamp(10px,1vh,16px) clamp(14px,1.3vw,20px)',marginBottom:'clamp(12px,1.3vh,20px)',fontSize:'clamp(11px,.8vw,14px)',color:'rgba(248,113,113,.9)'}}>{err}</div>}
-              {/* Label */}
-              <p style={{fontSize:'clamp(10px,.7vw,13px)',fontWeight:600,color:'var(--t3)',letterSpacing:'.05em',textTransform:'uppercase',marginBottom:'clamp(12px,1.4vh,20px)'}}>Artistes écoutés récemment</p>
-              {/* Grille */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(85px,8.5vw,130px),1fr))',gap:'clamp(14px,1.6vw,26px)'}}>
+          {/* ── COLONNE DROITE : flex-col — scroll sur grille, frise fixée en bas ─ */}
+          <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+            {/* Zone scrollable : titre + grille */}
+            <div style={{flex:1,overflowY:'auto',padding:'clamp(12px,1.2vh,20px) clamp(24px,2.4vw,42px) clamp(16px,1.6vh,24px)'}}>
+              <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
+                <button onClick={()=>setScreen('config')} className="bg" style={{fontSize:'clamp(11px,.8vw,15px)',marginBottom:'clamp(14px,1.6vh,22px)',display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex'}}>{IC.bk}</span>Retour</button>
+                <div style={{marginBottom:'clamp(16px,2vh,28px)'}}>
+                  <h1 style={{fontSize:'clamp(22px,2.6vw,44px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.92,marginBottom:'clamp(6px,.6vh,10px)'}}>Sélectionne un(e)<br/>ou des artistes</h1>
+                  <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t2)'}}>Sélectionne depuis ton top ou recherche dans tout Spotify</p>
+                </div>{/* fin div title */}
+                {err&&<div style={{background:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.3)',borderRadius:'clamp(9px,.8vw,14px)',padding:'clamp(10px,1vh,16px) clamp(14px,1.3vw,20px)',marginBottom:'clamp(12px,1.3vh,20px)',fontSize:'clamp(11px,.8vw,14px)',color:'rgba(248,113,113,.9)'}}>{err}</div>}
+                <p style={{fontSize:'clamp(10px,.7vw,13px)',fontWeight:600,color:'var(--t3)',letterSpacing:'.05em',textTransform:'uppercase',marginBottom:'clamp(12px,1.4vh,20px)'}}>Artistes écoutés récemment</p>
+                {/* Grille */}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(clamp(85px,8.5vw,130px),1fr))',gap:'clamp(14px,1.6vw,26px)'}}>
                 {topArtists.map(a=>{const s=selArts.find(x=>x.id===a.id);return(
                   <div key={a.id} onClick={()=>toggleArtist(a)} style={{cursor:'pointer',textAlign:'center'}}>
                     <div style={{position:'relative',marginBottom:'clamp(6px,.6vh,10px)'}}>
@@ -758,10 +759,13 @@ export default function App(){
                     <div style={{fontSize:'clamp(9px,.65vw,12px)',fontWeight:500,color:s?'var(--t1)':'var(--t2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
                   </div>
                 );})}
-              </div>
+              </div>{/* fin grille */}
+              </div>{/* fin maxWidth scroll */}
+            </div>{/* fin zone scrollable */}
 
-              {/* ── Frise chronologique ─── */}
-              <div style={{marginTop:'clamp(32px,4vh,56px)'}}>
+            {/* ── Frise chronologique — hors du scroll, toujours visible en bas ─── */}
+            <div style={{flexShrink:0,padding:'clamp(12px,1.4vh,20px) clamp(24px,2.4vw,42px)',borderTop:'1px solid rgba(255,255,255,.07)',background:'rgba(0,0,0,.25)',backdropFilter:'blur(16px)',WebkitBackdropFilter:'blur(16px)'}}>
+              <div style={{maxWidth:'min(1200px,96%)',margin:'0 auto'}}>
                 <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:'clamp(14px,1.6vh,22px)',gap:'clamp(12px,1.2vw,20px)'}}>
                   <div>
                     <h3 style={{fontSize:'clamp(18px,2vw,32px)',fontWeight:800,letterSpacing:'-.04em',lineHeight:.95,marginBottom:'clamp(5px,.5vh,8px)'}}>Période de sortie</h3>
@@ -772,7 +776,7 @@ export default function App(){
                     <span style={{fontSize:'clamp(12px,1.4vw,22px)',fontWeight:400,color:'var(--t3)',margin:'0 clamp(5px,.45vw,9px)'}}>—</span>
                     <span style={{fontSize:'clamp(20px,2.4vw,40px)',fontWeight:800,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{yearMax}</span>
                   </div>
-                </div>
+                </div>{/* fin flex header frise */}
                 <div style={{padding:'0 clamp(10px,1vw,16px)',marginBottom:'clamp(10px,1vh,14px)'}}>
                   <div className="rs">
                     <div style={{position:'absolute',top:0,bottom:0,left:`${(yearMin-1900)/(2026-1900)*100}%`,width:`${(yearMax-yearMin)/(2026-1900)*100}%`,background:'rgba(255,255,255,.75)',borderRadius:'999px',pointerEvents:'none'}}/>
@@ -780,14 +784,21 @@ export default function App(){
                     <input type="range" min={1900} max={2026} step={1} value={yearMax} onChange={e=>setYearMax(Math.max(parseInt(e.target.value),yearMin+1))} style={{zIndex:3}}/>
                   </div>
                 </div>
-                <div style={{display:'flex',justifyContent:'space-between',padding:'0 clamp(10px,1vw,16px)'}}>
-                  {[1900,1920,1940,1960,1980,2000,2010,2020,2026].map(y=>(
-                    <span key={y} onClick={()=>{if(Math.abs(y-yearMin)<=Math.abs(y-yearMax))setYearMin(Math.min(y,yearMax-1));else setYearMax(Math.max(y,yearMin+1));}} style={{fontSize:'clamp(8px,.58vw,11px)',color:'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s'}} onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'} onMouseLeave={e=>e.currentTarget.style.color='var(--t4)'}>{y}</span>
-                  ))}
+                {/* Labels positionnés en absolu pour aligner avec le vrai slider */}
+                <div style={{position:'relative',height:'clamp(14px,1.4vh,20px)',padding:'0 clamp(10px,1vw,16px)'}}>
+                  {[1900,1940,1960,1980,1990,2000,2005,2010,2015,2020,2026].map(y=>{
+                    const pct=(y-1900)/(2026-1900)*100;
+                    return(
+                      <span key={y} onClick={()=>{if(Math.abs(y-yearMin)<=Math.abs(y-yearMax))setYearMin(Math.min(y,yearMax-1));else setYearMax(Math.max(y,yearMin+1));}}
+                        style={{position:'absolute',left:`${pct}%`,transform:'translateX(-50%)',fontSize:'clamp(7px,.55vw,10px)',color:'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',whiteSpace:'nowrap',userSelect:'none'}}
+                        onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
+                        onMouseLeave={e=>e.currentTarget.style.color='var(--t4)'}>{y}</span>
+                    );
+                  })}
                 </div>
-              </div>
-            </div>
-          </div>
+              </div>{/* fin maxWidth frise */}
+            </div>{/* fin frise */}
+          </div>{/* fin col droite */}
 
         </div>{/* fin row */}
 
