@@ -61,13 +61,14 @@ input::placeholder{color:var(--t3);}
 .tg{color:#34d399;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(52,211,153,.45);}
 .ta{color:#fbbf24;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(251,191,36,.45);}
 .tr{color:#f87171;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(248,113,113,.45);animation:tp .5s ease-in-out infinite;}
-/* ── Slider dual-thumb frise ── */
-.rs{position:relative;height:clamp(18px,2vh,28px);display:flex;align-items:center;}
-.rs input[type=range]{position:absolute;width:100%;height:4px;appearance:none;-webkit-appearance:none;background:transparent;pointer-events:none;outline:none;}
-.rs input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:clamp(14px,1.3vh,20px);height:clamp(14px,1.3vh,20px);border-radius:50%;background:white;cursor:pointer;pointer-events:auto;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:transform .1s;}
-.rs input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15);}
-.rs input[type=range]::-moz-range-thumb{width:clamp(14px,1.3vh,20px);height:clamp(14px,1.3vh,20px);border-radius:50%;background:white;cursor:pointer;pointer-events:auto;border:none;box-shadow:0 2px 8px rgba(0,0,0,.4);}
-.rs::before{content:'';position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,.12);border-radius:999px;}
+/* ── Slider dual-thumb frise — taille fixe px pour zoom-proof ── */
+.rs{position:relative;height:24px;display:flex;align-items:center;}
+.rs input[type=range]{position:absolute;width:100%;height:4px;appearance:none;-webkit-appearance:none;background:transparent;pointer-events:none;outline:none;margin:0;padding:0;}
+.rs input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:white;cursor:pointer;pointer-events:auto;box-shadow:0 2px 8px rgba(0,0,0,.4);transition:transform .1s;}
+.rs input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
+.rs input[type=range]::-webkit-slider-thumb:active{transform:scale(1.1);}
+.rs input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:white;cursor:pointer;pointer-events:auto;border:none;box-shadow:0 2px 8px rgba(0,0,0,.4);}
+.rs::before{content:'';position:absolute;left:9px;right:9px;height:4px;background:rgba(255,255,255,.12);border-radius:999px;}
 `;
 
 const IC={
@@ -1149,24 +1150,23 @@ export default function App(){
                   </div>
                 </div>
                 {/* Slider index-based — thumb et labels parfaitement alignés */}
-                <div style={{padding:'0 clamp(10px,1vw,14px)',marginBottom:'clamp(6px,.6vh,10px)'}}>
+                <div style={{padding:'0 9px',marginBottom:8}}>
                   <div className="rs">
-                    {/* Barre remplie basée sur les indices */}
-                    <div style={{position:'absolute',top:0,bottom:0,left:`${minIdx/YN*100}%`,width:`${(maxIdx-minIdx)/YN*100}%`,background:'rgba(255,255,255,.75)',borderRadius:'999px',pointerEvents:'none'}}/>
+                    {/* Fill bar — formule calc pour alignement pixel-perfect avec les thumbs */}
+                    <div style={{position:'absolute',left:`calc(${minIdx/YN} * (100% - 18px) + 9px)`,width:`calc(${(maxIdx-minIdx)/YN} * (100% - 18px))`,height:4,background:'rgba(255,255,255,.8)',borderRadius:'999px',pointerEvents:'none'}}/>
                     <input type="range" min={0} max={YN} step={1} value={minIdx} onChange={e=>setMinIdx(Math.min(+e.target.value,maxIdx))} style={{zIndex:minIdx>YN-2?3:2}}/>
                     <input type="range" min={0} max={YN} step={1} value={maxIdx} onChange={e=>setMaxIdx(Math.max(+e.target.value,minIdx))} style={{zIndex:3}}/>
                   </div>
                 </div>
-                {/* Labels : seuls les 0/5 affichés, positionnés précisément */}
-                <div style={{position:'relative',height:'clamp(14px,1.4vh,18px)',padding:'0 clamp(10px,1vw,14px)'}}>
+                {/* Labels — calc() = exactement alignés avec les thumbs, résiste au zoom */}
+                <div style={{position:'relative',height:18,padding:'0 9px'}}>
                   {YEAR_LABELS.map(y=>{
                     const i=y-1900;
-                    const pct=i/YN*100;
                     const active=i===minIdx||i===maxIdx;
                     return(
                       <span key={y}
                         onClick={()=>{if(Math.abs(i-minIdx)<=Math.abs(i-maxIdx))setMinIdx(i);else setMaxIdx(i);}}
-                        style={{position:'absolute',left:`${pct}%`,transform:'translateX(-50%)',fontSize:'clamp(7px,.55vw,10px)',color:active?'rgba(255,255,255,.9)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:active?700:400,whiteSpace:'nowrap'}}
+                        style={{position:'absolute',left:`calc(${i/YN} * (100% - 18px) + 9px)`,transform:'translateX(-50%)',fontSize:10,color:active?'rgba(255,255,255,.9)':'var(--t4)',cursor:'pointer',fontVariantNumeric:'tabular-nums',transition:'color .1s',userSelect:'none',fontWeight:active?700:400,whiteSpace:'nowrap',fontFamily:'var(--F)'}}
                         onMouseEnter={e=>e.currentTarget.style.color='var(--t2)'}
                         onMouseLeave={e=>e.currentTarget.style.color=active?'rgba(255,255,255,.9)':'var(--t4)'}>{y}</span>
                     );
