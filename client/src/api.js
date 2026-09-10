@@ -5,7 +5,7 @@ const SP   = 'https://api.spotify.com/v1';
 // Toutes les requêtes (Railway + direct Spotify) partagent ce compteur
 // car elles utilisent le même access_token.
 let _lastReq = 0;
-const RATE_MS = 450; // 450ms entre chaque appel = ~2.2 req/sec
+const RATE_MS = 600; // 600ms entre requêtes (~1.6/sec, safe pour éviter 429)
 
 async function throttle() {
   const wait = Math.max(0, RATE_MS - (Date.now() - _lastReq));
@@ -47,11 +47,11 @@ async function apiFetch(path, _retry=2) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 429) {
-    if (_retry <= 0) throw new Error('Rate limit 429');
-    const wait = (parseInt(res.headers.get('Retry-After') || '5') + 1) * 1000;
-    console.warn(`[api] Railway 429 → retry dans ${Math.round(wait/1000)}s`);
+    if (_retry <= 0) throw new Error('Rate limit 429 — réessaie dans quelques secondes');
+    const wait = Math.max(8000, (parseInt(res.headers.get('Retry-After') || '8') + 2) * 1000);
+    console.warn(`[api] Railway 429 → 1 retry dans ${Math.round(wait/1000)}s`);
     await new Promise(r => setTimeout(r, wait));
-    return apiFetch(path, _retry - 1);
+    return apiFetch(path, 0); // max 1 retry
   }
   if (!res.ok) throw new Error(`Server ${res.status}: ${path}`);
   return res.json();
@@ -68,11 +68,11 @@ export async function spFetch(path, _retry=2) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 429) {
-    if (_retry <= 0) throw new Error('Rate limit 429');
-    const wait = (parseInt(res.headers.get('Retry-After') || '5') + 1) * 1000;
-    console.warn(`[api] Spotify 429 → retry dans ${Math.round(wait/1000)}s`);
+    if (_retry <= 0) throw new Error('Rate limit 429 — réessaie dans quelques secondes');
+    const wait = Math.max(8000, (parseInt(res.headers.get('Retry-After') || '8') + 2) * 1000);
+    console.warn(`[api] Spotify 429 → 1 retry dans ${Math.round(wait/1000)}s`);
     await new Promise(r => setTimeout(r, wait));
-    return spFetch(path, _retry - 1);
+    return spFetch(path, 0); // max 1 retry
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
