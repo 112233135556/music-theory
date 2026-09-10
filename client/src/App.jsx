@@ -498,6 +498,19 @@ export default function App(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[guestArtists]);
 
+  // BG rotation + mix cover rotation
+  useEffect(()=>{
+    if(screen!=='artists'||!topArtists.length)return;
+    const ivl=setInterval(()=>{
+      setMixCoverIdx(()=>({
+        solo:Math.floor(Math.random()*Math.min(topArtists.length,20)),
+        v1:Math.floor(Math.random()*Math.min(topArtists.length,20))
+      }));
+    },6000);
+    return()=>clearInterval(ivl);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[screen,topArtists.length]);
+
   // BG rotation
   useEffect(()=>{
     if(screen!=='home'||!topTracks.length)return;
@@ -975,7 +988,24 @@ export default function App(){
               </div>
             );})}
           </div>}
-          {/* Mix perso */}
+          {/* Cards Mix Solo / 1v1 */}
+          <div style={{display:'flex',gap:'clamp(10px,1vw,16px)',marginBottom:'clamp(12px,1.3vh,20px)',flexWrap:'wrap'}}>
+            {['solo','1v1'].map(mode=>{
+              const active=mixPerso&&mixMode===mode;
+              const bgImg=topArtists[mode==='solo'?mixCoverIdx.solo:mixCoverIdx.v1]?.images?.[0]?.url;
+              return(
+                <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'min(100%,clamp(160px,16vw,250px))',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
+                  <MixCoverTemplate mode={mode} artistUrl={bgImg}/>
+                  {active&&<div style={{position:'absolute',top:'clamp(6px,.6vh,10px)',left:'clamp(6px,.6vh,10px)',background:'rgba(255,255,255,.95)',color:'#000',borderRadius:'999px',padding:'clamp(2px,.2vh,4px) clamp(7px,.65vw,11px)',fontSize:'clamp(9px,.65vw,12px)',fontWeight:700,backdropFilter:'blur(8px)'}}>✓ Sélectionné</div>}
+                  <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'clamp(8px,.8vh,14px)',background:'linear-gradient(to top,rgba(0,0,0,.8) 0%,transparent 100%)'}}>
+                    <div style={{fontSize:'clamp(12px,.88vw,17px)',fontWeight:700}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
+                    <div style={{fontSize:'clamp(9px,.65vw,12px)',color:'rgba(255,255,255,.65)'}}>{mode==='solo'?'Tes écoutes Spotify':'Vos deux écoutes'}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* Mix perso legacy toggle (si ni solo ni 1v1 sélectionné) */}
           <div onClick={()=>setMixPerso(!mixPerso)} style={{background:mixPerso?'rgba(88,101,242,.14)':'var(--mR)',backdropFilter:'var(--mRb)',WebkitBackdropFilter:'var(--mRb)',boxShadow:mixPerso?'inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(88,101,242,.3),inset 0 -1px 0 rgba(255,255,255,.3)':'var(--le)',borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(12px,1.3vh,20px) clamp(15px,1.4vw,24px)',display:'flex',alignItems:'center',gap:'clamp(11px,.95vw,18px)',cursor:'pointer',marginBottom:'clamp(12px,1.3vh,20px)',transition:'all .15s'}}>
             <div style={{width:'clamp(36px,3.4vh,52px)',height:'clamp(36px,3.4vh,52px)',borderRadius:'clamp(9px,.8vw,14px)',flexShrink:0,background:'linear-gradient(135deg,#5865F2,#7c3aed,#ec4899)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(15px,1.5vh,22px)',color:'white',boxShadow:'0 4px 16px rgba(88,101,242,.28)'}}>{IC.music}</div>
             <div style={{flex:1}}><div style={{fontSize:'clamp(12px,.87vw,17px)',fontWeight:600,marginBottom:3}}>Mix personnel {mixPerso&&'✓'}</div><div style={{fontSize:'clamp(10px,.73vw,14px)',color:'var(--t2)'}}>Sons de tes 3 périodes d'écoute (~150 tracks)</div></div>
