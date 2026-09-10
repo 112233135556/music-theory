@@ -541,27 +541,23 @@ export default function App(){
     clearTimeout(artRef.current);
     if(artQ.length<2){setArtRes([]);return;}
     artRef.current=setTimeout(async()=>{
-      // Séquentiel (pas parallel) pour ne pas saturer le throttle global
-      const items1=[];const items2=[];
       try{
-        const r=await spDirect(`/search?q=${encodeURIComponent(artQ)}&type=artist&limit=6`);
-        items1.push(...(r.artists?.items||[]));
+        // api.search → Railway proxy → Spotify
+        // Pas de throttle client partagé avec pool building → toujours réactif
+        const r=await api.search(artQ,'artist',6);
+        const found=r.artists?.items||[];
+        console.log('[MT] artist search:',found.length,'résultats pour',artQ);
+        // Ne pas filtrer les top50 — l'user doit pouvoir les retrouver en recherche
+        setArtRes(found);
       }catch(e){
         if(e.message?.includes('429')){
+          // Rate limit : vider silencieusement, l'user peut réessayer
           setArtRes([]);
-          return; // fail fast sur 429 — pas de retry visible
+        }else{
+          console.warn('[MT] artist search error:',e.message);
+          setArtRes([]);
         }
       }
-      try{
-        const r=await spDirect(`/search?q=${encodeURIComponent(`"${artQ}"`)}&type=artist&limit=6`);
-        items2.push(...(r.artists?.items||[]));
-      }catch(e){}
-      const seen=new Set();
-      const combined=[...items1,...items2].filter(a=>{
-        if(seen.has(a.id))return false;seen.add(a.id);return true;
-      });
-      setArtRes(combined);
-      console.log('[MT] artist search:',combined.length,'résultats pour',artQ);
     },400);
   },[artQ]); // dépendance artQ seulement — topArtists via ref
 
