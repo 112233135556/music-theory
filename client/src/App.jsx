@@ -302,6 +302,7 @@ export default function App(){
   const[deviceId,setDeviceId]=useState(null);
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
+  const[mixCoverIdx,setMixCoverIdx]=useState({solo:0,v1:1});
   const[loadingMsg,setLoadingMsg]=useState('');
   const[guestArtists,setGuestArtists]=useState(null); // déclenche le build du pool Mix 1v1
   const[roundSolved,setRoundSolved]=useState(false);
@@ -365,7 +366,15 @@ export default function App(){
           spDirect('/me/top/artists?time_range=medium_term&limit=50'),
           spDirect('/me/top/tracks?time_range=medium_term&limit=50'),
         ]);
-        setUser(me);setTopArtists(arts.items||[]);setTopTracks(trs.items||[]);
+        const arts_=arts.items||[];
+        setUser(me);setTopArtists(arts_);setTopTracks(trs.items||[]);
+        if(arts_.length>0){
+          const n=arts_.length;
+          const s=Math.floor(Math.random()*n);
+          let v=Math.floor(Math.random()*n);
+          while(v===s&&n>1)v=Math.floor(Math.random()*n);
+          setMixCoverIdx({solo:s,v1:v});
+        }
       }catch(e){console.error('load',e);}
     })();
   },[screen==='login']);
@@ -666,7 +675,7 @@ export default function App(){
     try{
       // ─── Validation Mix 1v1 en mode solo ────────────────────────────────
       if(mixPerso&&mixMode==='1v1'&&gMode!=='1v1'){
-        setErr('Le Mix 1v1 nécessite une partie en mode 1v1. Va dans la config et sélectionne "1 vs 1".');
+        setErr('Le Mix 1v1 nécessite une partie en mode 1v1. Va dans la config et sélectionne "1v1".');
         setLoading(false);setLoadingMsg('');return;
       }
       if(mixPerso&&mixMode==='1v1'&&gMode==='1v1'){
@@ -1030,7 +1039,7 @@ export default function App(){
           <div style={{display:'flex',flexDirection:'column',gap:'clamp(9px,.9vh,14px)'}}>
             <div className="g2" style={{borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(13px,1.4vh,21px) clamp(15px,1.4vw,24px)'}}>
               <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',marginBottom:'clamp(9px,.9vh,14px)',fontWeight:500}}>Mode</p>
-              <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)'}}><Pill active={gMode==='solo'} onClick={()=>setGMode('solo')}>Solo</Pill><Pill active={gMode==='1v1'} onClick={()=>setGMode('1v1')}>1 vs 1</Pill></div>
+              <div style={{display:'flex',gap:'clamp(6px,.55vw,10px)'}}><Pill active={gMode==='solo'} onClick={()=>setGMode('solo')}>Solo</Pill><Pill active={gMode==='1v1'} onClick={()=>setGMode('1v1')}>1v1</Pill></div>
             </div>
             <div className="g2" style={{borderRadius:'clamp(14px,1.2vw,20px)',padding:'clamp(13px,1.4vh,21px) clamp(15px,1.4vw,24px)'}}>
               <p style={{fontSize:'clamp(10px,.72vw,14px)',color:'var(--t3)',marginBottom:'clamp(10px,1vh,16px)',fontWeight:500}}>Manches</p>
@@ -1065,7 +1074,7 @@ export default function App(){
             {/* Cards Solo + 1v1 */}
             {['solo','1v1'].map(mode=>{
               const active=mixPerso&&mixMode===mode;
-              const bgImg=mode==='solo'?topArtists[0]?.images?.[0]?.url:topArtists[1]?.images?.[0]?.url;
+              const bgImg=topArtists[mode==='solo'?mixCoverIdx.solo:mixCoverIdx.v1]?.images?.[0]?.url;
                   return(
                 <div key={mode} onClick={()=>{setMixPerso(true);setMixMode(mode);}} style={{cursor:'pointer',borderRadius:'clamp(10px,1vw,16px)',overflow:'hidden',position:'relative',width:'min(100%,clamp(160px,16vw,250px))',aspectRatio:'1',boxShadow:active?'0 0 0 2.5px rgba(255,255,255,.85),0 0 0 6px rgba(255,255,255,.1),0 8px 32px rgba(0,0,0,.5)':'0 6px 24px rgba(0,0,0,.4)',transition:'all .2s',flexShrink:0}}>
                   {/* Template CSS (reproduit le design sans fichier externe) */}
@@ -1075,7 +1084,7 @@ export default function App(){
                   {/* Label mode en bas */}
                   <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'clamp(8px,.8vh,12px)',background:'linear-gradient(to top,rgba(0,0,0,.7),transparent)',pointerEvents:'none'}}>
                     <div style={{fontSize:'clamp(11px,.9vw,16px)',fontWeight:700,color:'white'}}>{mode==='solo'?'Mix Solo':'Mix 1v1'}</div>
-                    <div style={{fontSize:'clamp(8px,.62vw,12px)',color:'rgba(255,255,255,.6)'}}>{mode==='solo'?'Tes écoutes':'Vos deux écoutes'}</div>
+                    <div style={{fontSize:'clamp(8px,.62vw,12px)',color:'rgba(255,255,255,.6)'}}>{mode==='solo'?"Un mix basé sur tes écoutes Spotify":"Vos goûts musicaux fusionnés en un mix"}</div>
                   </div>
                 </div>
               );
