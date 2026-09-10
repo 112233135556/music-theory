@@ -312,6 +312,10 @@ export default function App(){
   const srchRef=useRef(null);
   const artRef=useRef(null);
   const playerRef=useRef(null);
+  const selArtsRef=useRef([]);    // ref stable pour background loading
+  const roundsRef=useRef(10);
+  useEffect(()=>{selArtsRef.current=selArts;},[selArts]);
+  useEffect(()=>{roundsRef.current=rounds;},[rounds]);
 
   // Handle OAuth callback
   useEffect(()=>{
@@ -419,19 +423,30 @@ export default function App(){
     }catch(e){console.error('play',e);}
   },[deviceId]);
 
-  // ─── Build pool — spDirect calls Spotify API directly ──────
-  const buildPool=useCallback(async()=>{
+  // ─── Génère des requêtes année par année pour couvrir toute la carrière ────
+  const yearQueriesFor=(artistName,minY,maxY)=>{
+    const span=maxY-minY;
+    const step=Math.max(5,Math.floor(span/5)); // 5 tranches max
+    const queries=[];
+    for(let y=minY;y<maxY;y+=step){
+      const end=Math.min(y+step,maxY);
+      queries.push(`"${artistName}" year:${y}-${end}`);
+    }
+    queries.push(artistName); // requête générale aussi
+    return queries;
+  };
+
+  // ─── Pool initial (rapide) — 2 requêtes par artiste pour démarrer vite ────
+  const buildInitialPool=useCallback(async()=>{
     let tracks=[];
     setErr('');
     if(mixPerso){
-      // Fetch all 3 time periods directly from Spotify
       try{
         const[s,m,l]=await Promise.all([
           spDirect('/me/top/tracks?time_range=short_term&limit=50'),
           spDirect('/me/top/tracks?time_range=medium_term&limit=50'),
           spDirect('/me/top/tracks?time_range=long_term&limit=50'),
         ]);
-        // Interleave les 3 périodes pour briser l'ordre popularité Spotify
         const seen=new Set();
         const s_=s.items||[], m_=m.items||[], l_=l.items||[];
         const maxL=Math.max(s_.length,m_.length,l_.length);
@@ -440,69 +455,76 @@ export default function App(){
             if(list[i]&&!seen.has(list[i].id)){seen.add(list[i].id);tracks.push(list[i]);}
           }
         }
-      }catch(e){
-        console.error('mix pool error:',e.message);
-        tracks=topTracks; // fallback to already loaded
-      }
+      }catch(e){tracks=topTracks;}
     }else{
-        for(const a of selArts){
-        const artTracks=[];
-        console.log(`[MT] Catalogue ${a.name}...`);
+      for(const a of selArts){
         try{
-          // Endpoint server-side qui fait tout (albums+tracks, pagine avec limit=20)
-          const result=await api.artistAllTracks(a.id);
-          artTracks.push(...(result.tracks||[]));
-          console.log(`[MT] ${a.name}: ${artTracks.length} sons via server`);
-        }catch(e){
-          console.warn(`[MT] all-tracks failed ${a.name}:`,e.message,'; fallback search');
-          // Fallback : search varié via serveur
-          const qs=[a.name,`"${a.name}"`,`${a.name} music`,`${a.name} feat`];
-          for(const q of qs){
-            try{
-              const r=await api.search(q,'track',6);
-              artTracks.push(...(r.tracks?.items||[]).filter(t=>t.artists.some(ar=>ar.id===a.id)));
-            }catch(e2){}
-          }
-          console.log(`[MT] ${a.name}: ${artTracks.length} sons (fallback)`);
-        }
-        tracks.push(...artTracks);
+          // 2 requêtes rapides pour démarrer
+          const[r1,r2]=await Promise.all([
+            api.search(a.name,'track',6),
+            api.search(`"${a.name}"`,'track',6),
+          ]);
+          const fn=t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase());
+          tracks.push(...(r1.tracks?.items||[]).filter(fn));
+          tracks.push(...(r2.tracks?.items||[]).filter(fn));
+        }catch(e){}
       }
     }
     if(!tracks.length)return[];
-    // Dédupliquer
     const seen=new Set();
     const unique=tracks.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
-    // Filtrer par période de sortie
-    const inRange=unique.filter(t=>{
-      const y=parseInt(t.album?.release_date?.slice(0,4)||'0');
-      if(y===0)return true;
-      if(yearMin===yearMax)return y===yearMin; // année unique exacte
-      return y>=yearMin&&y<=yearMax;
-    });
-    if(!inRange.length){
-      setErr(`Aucun son entre ${yearMin} et ${yearMax}. Élargis la période.`);
-      return[];
+    const inRange=unique.filter(t=>{const y=parseInt(t.album?.release_date?.slice(0,4)||'0');if(y===0)return true;if(yearMin===yearMax)return y===yearMin;return y>=yearMin&&y<=yearMax;});
+    const pool=inRange.length>0?inRange:unique; // si filtre trop strict, ignorer
+    return rotatePool(pool,Math.min(roundsRef.current,pool.length),5);
+  },[selArts,mixPerso,topTracks,yearMin,yearMax]);
+
+  // ─── Chargement background (tourne pendant qu'on joue) ───────────────────
+  const loadMoreInBackground=useCallback(async(currentPool,setPoolFn)=>{
+    if(mixPerso)return; // mix perso a déjà tout en initial
+    const existingIds=new Set(currentPool.map(t=>t.id));
+    const newTracks=[];
+    for(const a of selArtsRef.current){
+      const queries=yearQueriesFor(a.name,Math.max(1970,yearMin),yearMax);
+      for(const q of queries){
+        await new Promise(r=>setTimeout(r,150)); // rate-limit doux
+        try{
+          const r=await api.search(q,'track',6);
+          const fn=t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase());
+          const fresh=(r.tracks?.items||[]).filter(t=>fn(t)&&!existingIds.has(t.id));
+          fresh.forEach(t=>{existingIds.add(t.id);newTracks.push(t);});
+        }catch(e){}
+      }
     }
-    // Prendre rounds sons — si le pool est plus petit, prendre tout
-    const target=Math.min(rounds,inRange.length);
-    return rotatePool(inRange,target,5);
-  },[selArts,mixPerso,topTracks,rounds,yearMin,yearMax]);
+    if(!newTracks.length)return;
+    console.log(`[MT] Background: +${newTracks.length} sons supplémentaires`);
+    setPoolFn(prev=>{
+      const combined=[...prev,...newTracks];
+      const seen=new Set();
+      const unique=combined.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
+      const inRange=unique.filter(t=>{const y=parseInt(t.album?.release_date?.slice(0,4)||'0');if(y===0)return true;if(yearMin===yearMax)return y===yearMin;return y>=yearMin&&y<=yearMax;});
+      const final=inRange.length>0?inRange:unique;
+      return rotatePool(final,Math.min(roundsRef.current,final.length),5);
+    });
+  },[mixPerso,yearMin,yearMax]);
+
 
   const startGame=useCallback(async()=>{
     setLoading(true);setErr('');
     try{
-      const p=await buildPool();
+      // Phase 1 : pool initial rapide (2 requêtes/artiste) → démarre le jeu
+      const p=await buildInitialPool();
       if(!p.length){
-        const names=selArts.map(a=>a.name).join(', ')||'aucun';
-        setErr(`Aucun son trouvé pour : ${names}`);
+        setErr(`Aucun son trouvé — essaie d'élargir la période ou d'autres artistes`);
         setLoading(false);return;
       }
       setPool(p);setCIdx(0);setScore(0);setTimer(dur);setRevealed(false);setAnswer('');setProg(0);
       setScreen('game');
+      setLoading(false);
       setTimeout(()=>{if(p[0])playTrack(p[0]);},500);
-    }catch(e){setErr(`Erreur: ${e.message}`);}
-    setLoading(false);
-  },[buildPool,dur,playTrack,selArts]);
+      // Phase 2 : chargement arrière-plan (requêtes par tranche d'années → distribution sur toute la carrière)
+      loadMoreInBackground(p,setPool);
+    }catch(e){setErr(`Erreur: ${e.message}`);setLoading(false);}
+  },[buildInitialPool,loadMoreInBackground,dur,playTrack]);
 
   const doReveal=useCallback(()=>{clearInterval(timerRef.current);setRevealed(true);setScreen('reveal');},[]);
 
