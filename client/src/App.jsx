@@ -15,6 +15,14 @@ const YN=126;
 const YEAR_LABELS=YEAR_STEPS.filter(y=>y%5===0||y===2026); // 1900,1905,...,2025,2026
 
 
+function saveTokens({access_token,refresh_token,expires_in}){
+  localStorage.setItem('access_token',access_token);
+  localStorage.setItem('refresh_token',refresh_token);
+  localStorage.setItem('token_expires',Date.now()+parseInt(expires_in)*1000);
+}
+function isLoggedIn(){return!!localStorage.getItem('access_token');}
+function logout(){localStorage.clear();window.location.href='/';}
+
 function DynBg({url,mode}){
   const f={
     neutral:'saturate(1.8) brightness(.35) blur(clamp(55px,7vw,110px))',
