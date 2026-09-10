@@ -568,19 +568,28 @@ export default function App(){
     if(artQ.length<2){setArtRes([]);return;}
     artRef.current=setTimeout(async()=>{
       try{
-        // api.search via serveur — même chemin que l'autocomplete sons qui fonctionne
-        const r=await api.search(artQ,'artist',6);
-        const found=r.artists?.items||[];
-        console.log('[MT] artist search:',found.length,'results for',artQ);
-        // Filtre les artistes déjà dans le top (ref, pas state)
-        const topIds=new Set(topArtistsRef.current.map(a=>a.id));
-        const filtered=found.filter(a=>!topIds.has(a.id));
-        setArtRes(filtered.length>0?filtered:found);
+        // Double requête : exact en premier (guillemets) + fuzzy → plus de chances de trouver
+        // ex: "Niro" exact + Niro fuzzy → le bon Niro apparaît même s'il est moins connu globalement
+        const [r1,r2]=await Promise.allSettled([
+          api.search(`"${artQ}"`, 'artist', 6),  // exact match
+          api.search(artQ, 'artist', 6),          // fuzzy
+        ]);
+        const items1=r1.status==='fulfilled'?r1.value.artists?.items||[]:[];
+        const items2=r2.status==='fulfilled'?r2.value.artists?.items||[]:[];
+        // Combiner sans doublons (exact en priorité)
+        const seen=new Set();
+        const combined=[...items1,...items2].filter(a=>{
+          if(seen.has(a.id))return false;seen.add(a.id);return true;
+        });
+        // ⚠️ Ne PAS filtrer les top 50 — si l'artiste est dans le top il doit quand même
+        // être trouvable via la barre de recherche
+        setArtRes(combined);
+        console.log('[MT] artist search:',combined.length,'résultats pour',artQ);
       }catch(e){
-        console.error('[MT] artist search failed:',e.message);
-        setErr(`Recherche "${artQ}" échouée: ${e.message}`);
+        console.warn('[MT] artist search error:',e.message);
+        setArtRes([]);
       }
-    },400);
+    },350);
   },[artQ]); // dépendance artQ seulement — topArtists via ref
 
   const playTrack=useCallback(async(track)=>{
@@ -605,11 +614,15 @@ export default function App(){
       if(res.ok){
         setProg(0);
       }else if(res.status===403){
-        console.warn('[MT] play 403 → reconnect SDK');
+        // Track géo-restreinte ou indisponible → skip silencieux vers le suivant
+        console.warn('[MT] 403 sur',track.name,'→ auto-skip');
+        setTimeout(()=>nextRoundRef.current?.(),800);
+      }else if(res.status===404){
+        // Device ID invalide → reconnect SDK
         playerRef.current?.disconnect();
         setTimeout(()=>playerRef.current?.connect(),800);
       }else{
-        console.warn('[MT] play',res.status);
+        console.warn('[MT] play erreur',res.status);
       }
     }catch(e){console.error('[MT] play error',e.message);}
   },[deviceId]);
@@ -868,7 +881,11 @@ export default function App(){
   const botPad=showPB?'var(--PB)':'0px';
   // UX: top artistes visibles par défaut, cachés quand on cherche (résultats globaux Spotify)
   const isSearching=artQ.length>=2;
-  const filtLocal=isSearching?[]:topArtists; // cache top artistes pendant la recherche
+  // Quand on cherche : garder les top artistes filtrés dans la grille (pas vide)
+  // + les résultats Spotify dans le dropdown de la topbar
+  const filtLocal=isSearching
+    ?topArtists.filter(a=>a.name.toLowerCase().includes(artQ.toLowerCase()))
+    :topArtists;
   const showSPRes=isSearching&&artRes.length>0;
   const showSearching=isSearching&&artRes.length===0;
 
@@ -889,8 +906,13 @@ export default function App(){
               {a.images?.[0]?.url?<img src={a.images[0].url} style={{width:'clamp(32px,3vh,44px)',height:'clamp(32px,3vh,44px)',borderRadius:'50%',objectFit:'cover',flexShrink:0}} alt=""/>:<div style={{width:'clamp(32px,3vh,44px)',height:'clamp(32px,3vh,44px)',borderRadius:'50%',background:'linear-gradient(135deg,#2a1a4a,#1a2a4a)',flexShrink:0}}/>}
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:'clamp(12px,.88vw,16px)',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
-                {a.genres?.[0]&&<div style={{fontSize:'clamp(9px,.65vw,12px)',color:'var(--t3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',textTransform:'capitalize'}}>{a.genres[0]}</div>}
+                <div style={{fontSize:'clamp(9px,.65vw,12px)',color:'var(--t3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {topArtistsRef.current.some(t=>t.id===a.id)
+                    ?<span style={{color:'rgba(52,211,153,.7)',textTransform:'none'}}>Dans ton top</span>
+                    :<span style={{textTransform:'capitalize'}}>{a.genres?.[0]||''}</span>}
+                </div>
               </div>
+              {selArts.find(x=>x.id===a.id)&&<div style={{width:'clamp(18px,1.6vh,24px)',height:'clamp(18px,1.6vh,24px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(9px,.8vh,12px)',fontWeight:700,flexShrink:0}}>✓</div>}
               {s&&<div style={{width:'clamp(18px,1.6vh,24px)',height:'clamp(18px,1.6vh,24px)',borderRadius:'50%',background:'white',color:'#000',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'clamp(9px,.8vh,12px)',fontWeight:700,flexShrink:0}}>✓</div>}
             </div>
           );})}
