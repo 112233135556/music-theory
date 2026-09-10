@@ -616,13 +616,12 @@ export default function App(){
           }
         }
         onProgress&&onProgress(`${a.name} — ${all.length} sons…`,all.length);
-        // Si rate limit détecté → pause 5s avant de continuer
         if(has429){
-          console.warn('[MT] 429 détecté → pause 5s');
-          await new Promise(r=>setTimeout(r,10000));
-          console.warn('[MT] 429 → pause 10s');
+          console.warn('[MT] 429 → pause 12s');
+          await new Promise(r=>setTimeout(r,12000));
+        }else{
+          await new Promise(r=>setTimeout(r,700)); // 700ms entre requêtes = ~1.4/sec safe
         }
-        // Pas de délai supplémentaire — rate limiter dans api.js gère les 450ms
       }
     }
     return all;
