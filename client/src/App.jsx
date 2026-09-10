@@ -79,6 +79,7 @@ input::placeholder{color:var(--t3);}
 .tg{color:#34d399;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(52,211,153,.45);}
 .ta{color:#fbbf24;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(251,191,36,.45);}
 .tr{color:#f87171;text-shadow:0 0 clamp(12px,1.5vw,30px) rgba(248,113,113,.45);animation:tp .5s ease-in-out infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
 .rs{position:relative;height:clamp(4px,.38vh,6px);background:rgba(255,255,255,.12);border-radius:999px;}
 .rs input[type=range]{-webkit-appearance:none;appearance:none;position:absolute;width:100%;height:100%;background:transparent;outline:none;pointer-events:none;margin:0;padding:0;border:none;top:0;left:0;}
 .rs input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:clamp(18px,1.7vh,24px);height:clamp(18px,1.7vh,24px);border-radius:50%;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.55);cursor:grab;pointer-events:all;transition:transform .1s,box-shadow .1s;}
@@ -297,6 +298,7 @@ export default function App(){
   const[deviceId,setDeviceId]=useState(null);
   const[showProfile,setShowProfile]=useState(false);
   const[loading,setLoading]=useState(false);
+  const[loadingMsg,setLoadingMsg]=useState('');
   const[mixMode,setMixMode]=useState('solo'); // 'solo' | '1v1'
   const[minIdx,setMinIdx]=useState(105); // 2005
   // maxIdx déjà défini plus bas via useState(YN)
@@ -413,119 +415,149 @@ export default function App(){
 
   const playTrack=useCallback(async(track)=>{
     if(!deviceId||!track)return;
+    const tok=localStorage.getItem('access_token');
+    // Étape 1 : transférer la lecture vers notre device SDK (évite le 403)
     try{
-      await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
+      await fetch('https://api.spotify.com/v1/me/player',{
         method:'PUT',
-        headers:{Authorization:`Bearer ${localStorage.getItem('access_token')}`,'Content-Type':'application/json'},
+        headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
+        body:JSON.stringify({device_ids:[deviceId],play:false}),
+      });
+      await new Promise(r=>setTimeout(r,500)); // laisser le temps au transfer
+    }catch(e){}
+    // Étape 2 : lancer le son
+    try{
+      const res=await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
+        method:'PUT',
+        headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
         body:JSON.stringify({uris:[`spotify:track:${track.id}`],position_ms:0}),
       });
-      setProg(0);
-    }catch(e){console.error('play',e);}
+      if(res.ok){
+        setProg(0);
+      }else if(res.status===403){
+        console.warn('[MT] play 403 → reconnect SDK');
+        playerRef.current?.disconnect();
+        setTimeout(()=>playerRef.current?.connect(),800);
+      }else{
+        console.warn('[MT] play',res.status);
+      }
+    }catch(e){console.error('[MT] play error',e.message);}
   },[deviceId]);
 
-  // ─── Génère des requêtes année par année pour couvrir toute la carrière ────
+  // ─── Queries par tranches de 3 ans + filtre artist: strict ─────────────
   const yearQueriesFor=(artistName,minY,maxY)=>{
-    const span=maxY-minY;
-    const step=Math.max(5,Math.floor(span/5)); // 5 tranches max
     const queries=[];
-    for(let y=minY;y<maxY;y+=step){
-      const end=Math.min(y+step,maxY);
-      queries.push(`"${artistName}" year:${y}-${end}`);
+    // Tranches de 3 ans → résultats distincts + couvre toute la carrière
+    for(let y=minY;y<=maxY-3;y+=3){
+      const end=Math.min(y+3,maxY);
+      queries.push(`artist:"${artistName}" year:${y}-${end}`);
     }
-    queries.push(artistName); // requête générale aussi
+    // Requête générale artiste (pour les hits récents)
+    queries.push(`artist:"${artistName}"`);
     return queries;
   };
 
-  // ─── Pool initial (rapide) — 2 requêtes par artiste pour démarrer vite ────
-  const buildInitialPool=useCallback(async()=>{
-    let tracks=[];
-    setErr('');
-    if(mixPerso){
-      try{
+  // ─── Filtre strict : artiste PRINCIPAL seulement + non-playable exclus ──
+  const isMainArtist=(track,artistId,artistNameLow)=>{
+    if(track.is_playable===false)return false; // pas dispo dans la région
+    const first=track.artists?.[0];
+    return first?.id===artistId||first?.name?.toLowerCase()===artistNameLow;
+  };
+
+  // ─── isMainArtist : artiste principal uniquement + exclure non-playable ─────
+  const isMainArtist=(track,artistId,nameLow)=>{
+    if(track.is_playable===false)return false;
+    const first=track.artists?.[0];
+    return first?.id===artistId||first?.name?.toLowerCase()===nameLow;
+  };
+
+  // ─── fetchAllSongs : catalogue complet pour chaque artiste sélectionné ──────
+  // Stratégie : chaque année du range × 3 offsets + 6 pages générales
+  // → tout ce que Spotify peut retourner pour cet artiste sur la période
+  const fetchAllSongs=async(artists,minY,maxY,onProgress)=>{
+    const all=[]; const seenIds=new Set();
+    for(const a of artists){
+      const nameLow=a.name.toLowerCase();
+      const fn=t=>isMainArtist(t,a.id,nameLow);
+      onProgress&&onProgress(`${a.name}…`,all.length);
+      // Construire les jobs : année par année × offsets + requêtes générales
+      const jobs=[];
+      for(let y=minY;y<=maxY;y++){
+        for(const off of[0,6,12])jobs.push({q:`artist:"${a.name}" year:${y}`,off});
+      }
+      for(const off of[0,6,12,18,24,30])jobs.push({q:`artist:"${a.name}"`,off});
+      // Exécuter par batch de 4 en parallèle (rate-limit doux)
+      const BATCH=4;
+      for(let i=0;i<jobs.length;i+=BATCH){
+        const batch=jobs.slice(i,i+BATCH);
+        const results=await Promise.allSettled(batch.map(({q,off})=>api.search(q,'track',6,off)));
+        for(const res of results){
+          if(res.status!=='fulfilled')continue;
+          for(const t of(res.value.tracks?.items||[]).filter(fn)){
+            if(!seenIds.has(t.id)){seenIds.add(t.id);all.push(t);}
+          }
+        }
+        onProgress&&onProgress(`${a.name} — ${all.length} sons…`,all.length);
+        await new Promise(r=>setTimeout(r,80));
+      }
+    }
+    return all;
+  };
+
+  // ─── startGame : charge tout, vérifie, shuffle, lance ────────────────────────
+  const startGame=useCallback(async()=>{
+    setLoading(true);setLoadingMsg('Initialisation…');setErr('');
+    let rawTracks=[];
+    try{
+      if(mixPerso){
+        setLoadingMsg('Chargement de tes écoutes Spotify…');
         const[s,m,l]=await Promise.all([
           spDirect('/me/top/tracks?time_range=short_term&limit=50'),
           spDirect('/me/top/tracks?time_range=medium_term&limit=50'),
           spDirect('/me/top/tracks?time_range=long_term&limit=50'),
         ]);
         const seen=new Set();
-        const s_=s.items||[], m_=m.items||[], l_=l.items||[];
-        const maxL=Math.max(s_.length,m_.length,l_.length);
-        for(let i=0;i<maxL;i++){
+        const s_=s.items||[],m_=m.items||[],l_=l.items||[];
+        for(let i=0;i<Math.max(s_.length,m_.length,l_.length);i++){
           for(const list of[s_,m_,l_]){
-            if(list[i]&&!seen.has(list[i].id)){seen.add(list[i].id);tracks.push(list[i]);}
+            if(list[i]&&!seen.has(list[i].id)){seen.add(list[i].id);rawTracks.push(list[i]);}
           }
         }
-      }catch(e){tracks=topTracks;}
-    }else{
-      for(const a of selArts){
-        try{
-          // 2 requêtes rapides pour démarrer
-          const[r1,r2]=await Promise.all([
-            api.search(a.name,'track',6),
-            api.search(`"${a.name}"`,'track',6),
-          ]);
-          const fn=t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase());
-          tracks.push(...(r1.tracks?.items||[]).filter(fn));
-          tracks.push(...(r2.tracks?.items||[]).filter(fn));
-        }catch(e){}
+        setLoadingMsg(`${rawTracks.length} sons du mix…`);
+      }else{
+        rawTracks=await fetchAllSongs(selArts,yearMin,yearMax,(msg)=>setLoadingMsg(msg));
       }
+    }catch(e){
+      setErr(`Erreur : ${e.message}`);setLoading(false);setLoadingMsg('');return;
     }
-    if(!tracks.length)return[];
-    const seen=new Set();
-    const unique=tracks.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
-    const inRange=unique.filter(t=>{const y=parseInt(t.album?.release_date?.slice(0,4)||'0');if(y===0)return true;if(yearMin===yearMax)return y===yearMin;return y>=yearMin&&y<=yearMax;});
-    const pool=inRange.length>0?inRange:unique; // si filtre trop strict, ignorer
-    return rotatePool(pool,Math.min(roundsRef.current,pool.length),5);
-  },[selArts,mixPerso,topTracks,yearMin,yearMax]);
-
-  // ─── Chargement background (tourne pendant qu'on joue) ───────────────────
-  const loadMoreInBackground=useCallback(async(currentPool,setPoolFn)=>{
-    if(mixPerso)return; // mix perso a déjà tout en initial
-    const existingIds=new Set(currentPool.map(t=>t.id));
-    const newTracks=[];
-    for(const a of selArtsRef.current){
-      const queries=yearQueriesFor(a.name,Math.max(1970,yearMin),yearMax);
-      for(const q of queries){
-        await new Promise(r=>setTimeout(r,150)); // rate-limit doux
-        try{
-          const r=await api.search(q,'track',6);
-          const fn=t=>t.artists.some(ar=>ar.id===a.id||ar.name.toLowerCase()===a.name.toLowerCase());
-          const fresh=(r.tracks?.items||[]).filter(t=>fn(t)&&!existingIds.has(t.id));
-          fresh.forEach(t=>{existingIds.add(t.id);newTracks.push(t);});
-        }catch(e){}
-      }
-    }
-    if(!newTracks.length)return;
-    console.log(`[MT] Background: +${newTracks.length} sons supplémentaires`);
-    setPoolFn(prev=>{
-      const combined=[...prev,...newTracks];
-      const seen=new Set();
-      const unique=combined.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
-      const inRange=unique.filter(t=>{const y=parseInt(t.album?.release_date?.slice(0,4)||'0');if(y===0)return true;if(yearMin===yearMax)return y===yearMin;return y>=yearMin&&y<=yearMax;});
-      const final=inRange.length>0?inRange:unique;
-      return rotatePool(final,Math.min(roundsRef.current,final.length),5);
+    // Filtre année
+    const playable=rawTracks.filter(t=>t.is_playable!==false);
+    const base=playable.length>0?playable:rawTracks;
+    const inRange=base.filter(t=>{
+      const y=parseInt(t.album?.release_date?.slice(0,4)||'0');
+      if(y===0)return true;
+      if(yearMin===yearMax)return y===yearMin;
+      return y>=yearMin&&y<=yearMax;
     });
-  },[mixPerso,yearMin,yearMax]);
+    const pool=inRange.length>0?inRange:base;
+    if(!pool.length){
+      setErr('Aucun son trouvé — essaie une autre période ou sélectionne d'autres artistes.');
+      setLoading(false);setLoadingMsg('');return;
+    }
+    // Shuffle aléatoire complet sur tout le catalogue trouvé
+    const shuffled=[...pool].sort(()=>Math.random()-0.5);
+    const actualRounds=Math.min(rounds,shuffled.length);
+    const finalPool=shuffled.slice(0,actualRounds);
+    const rangeInfo=inRange.length<rawTracks.length?` sur la période ${yearMin}–${yearMax}`:'';
+    setLoadingMsg(`✓ ${pool.length} sons${rangeInfo} — ${actualRounds} manches, c'est parti !`);
+    await new Promise(r=>setTimeout(r,900));
+    setPool(finalPool);setCIdx(0);setScore(0);setTimer(dur);
+    setRevealed(false);setAnswer('');setProg(0);
+    setScreen('game');setLoading(false);setLoadingMsg('');
+    setTimeout(()=>{if(finalPool[0])playTrack(finalPool[0]);},500);
+  },[mixPerso,selArts,yearMin,yearMax,rounds,dur,playTrack,fetchAllSongs]);
 
-
-  const startGame=useCallback(async()=>{
-    setLoading(true);setErr('');
-    try{
-      // Phase 1 : pool initial rapide (2 requêtes/artiste) → démarre le jeu
-      const p=await buildInitialPool();
-      if(!p.length){
-        setErr(`Aucun son trouvé — essaie d'élargir la période ou d'autres artistes`);
-        setLoading(false);return;
-      }
-      setPool(p);setCIdx(0);setScore(0);setTimer(dur);setRevealed(false);setAnswer('');setProg(0);
-      setScreen('game');
-      setLoading(false);
-      setTimeout(()=>{if(p[0])playTrack(p[0]);},500);
-      // Phase 2 : chargement arrière-plan (requêtes par tranche d'années → distribution sur toute la carrière)
-      loadMoreInBackground(p,setPool);
-    }catch(e){setErr(`Erreur: ${e.message}`);setLoading(false);}
-  },[buildInitialPool,loadMoreInBackground,dur,playTrack]);
-
+  const doReveal
   const doReveal=useCallback(()=>{clearInterval(timerRef.current);setRevealed(true);setScreen('reveal');},[]);
 
   const nextRound=useCallback(()=>{
@@ -658,6 +690,19 @@ export default function App(){
     <style>{CSS}</style>
     <DynBg url={bgUrl} mode={bgMode}/>
     {showProfile&&<ProfileModal user={user} onClose={()=>setShowProfile(false)}/>}
+
+    {/* ── LOADING OVERLAY — affiché pendant le chargement du catalogue ── */}
+    {loading&&loadingMsg&&<div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.85)',backdropFilter:'blur(32px)',WebkitBackdropFilter:'blur(32px)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'clamp(16px,2vh,28px)'}}>
+      <div style={{textAlign:'center',maxWidth:'min(480px,85vw)',padding:'0 clamp(20px,3vw,40px)'}}>
+        {/* Spinner */}
+        {!loadingMsg.startsWith('✓')&&<div style={{width:'clamp(36px,4vh,52px)',height:'clamp(36px,4vh,52px)',borderRadius:'50%',border:'3px solid rgba(255,255,255,.12)',borderTopColor:'rgba(255,255,255,.8)',animation:'spin .9s linear infinite',margin:'0 auto clamp(16px,2vh,24px)'}}/>}
+        {loadingMsg.startsWith('✓')&&<div style={{fontSize:'clamp(28px,4vw,52px)',marginBottom:'clamp(10px,1.2vh,18px)'}}>✓</div>}
+        <p style={{fontSize:'clamp(14px,1.4vw,22px)',fontWeight:600,color:'var(--t1)',marginBottom:'clamp(6px,.6vh,10px)',letterSpacing:'-.02em'}}>{loadingMsg}</p>
+        <p style={{fontSize:'clamp(10px,.8vw,14px)',color:'var(--t3)'}}>
+          {loadingMsg.startsWith('✓')?'Lancement dans une seconde…':'Chargement du catalogue Spotify…'}
+        </p>
+      </div>
+    </div>}
 
     {/* TOP BAR */}
     {screen==='home'
